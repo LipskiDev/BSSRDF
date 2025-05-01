@@ -1,0 +1,31 @@
+
+# Ignore Build output
+cmake-build*
+build
+lib
+
+# Ignore Visual Studio files
+*.vs
+Debug
+Release
+ipch
+
+# Ignore VS Code configuration
+.vscode
+
+# Ignore JetBrains configurations
+.idea
+.run
+
+# Ignore files generated from .ph template headers
+cgv/base/call_interface_impl.h
+cgv/reflect/method_interface_impl.h
+cgv/signal/abst_signal.h
+cgv/signal/bool_signal.h
+cgv/signal/rebind.h
+cgv/signal/signal.h
+cgv/type/invalid_type.h
+cgv/type/traits/function_pointer.h
+cgv/type/traits/method_pointer.h
+cgv/utils/ostream_printf.h
+libs/cgv_gl/gl/gl_context_switch.h

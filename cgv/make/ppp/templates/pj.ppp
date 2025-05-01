@@ -1,0 +1,370 @@
+@=
+// previous line ensures that one can use the direct mode of ppp
+//
+// on entering this file, the following variables are predefined:
+//
+// - SYSTEM          ... one of "windows" or "linux"
+//
+// - INPUT_DIR       ... directory containing the currently processed project file
+// - INPUT_PATH      ... full path to the currently processed project file
+// - INPUT_FILE      ... name of the project file with extension
+//
+// - CGV_DIR         ... from the obligatory environment variable CGV_DIR
+// - CGV_INSTALL     ... from environment variable CGV_INSTALL or if not defined 
+//                       defaults to CGV_DIR
+// - CGV_BUILD       ... from environment variable CGV_BUILD or if not defined 
+//                       defaults CGV_DIR/build
+// - CGV_BUILD_DIR   ... CGV_BUILD extended by compiler / ide specific sub directory
+//
+// - CGV_SUPPORT_DIR ... from environment variable CGV_SUPPORT_DIR or undefined if 
+//                       environment variable not defined
+// - CGV_CHARSET     ... from environment variable CGV_CHARSET or Unicode if 
+//                       environment variable is not defined. Use define_charset.bat to set environment variable
+// - CGV_DATA        ... from environment variable CGV_DATA or undefined if 
+//                       environment variable not defined
+// - CGV_COMPILER    ... from environment variable CGV_COMPILER or if not defined 
+//                       the defaults are "vs9" for "windows" and "gcc" for "linux"
+// - CGV_COMPILER_VERSION ... 8, 9, 10, 12, 14 for the visual studio compilers 
+//                            "vs8", "vs9", "vs10", "vs12", "vs14"
+// - CGV_IDE         ... from environment variable CGV_IDE or from command line
+//                       argument to ppp. Defaults to "visual studio" for vs compilers.
+//                       For gcc also "eclipse" is allowed.
+//
+//========================================
+// there is only one obligatory define:
+//========================================
+// the globally unique identifier of project
+
+projectGUID = "E4E3902D-4700-4EE9-A64E-6BD4DD762E4D";
+
+//====================================================================
+// optional project definition
+//====================================================================
+//projectType can take the values
+// - "library" ... library that can be compiled to static and shared version
+// - "static_library" ... library that can be compiled only in static version
+// - "shared_library" ... library that can be compiled only in shared version
+// - "plugin" ... same as library but used as plugin to an application
+// - "application" ... executable that can take arguments of the form "plugin:my_plugin"
+// - "application_plugin" ... has the same configurations as a plugin plus two additional
+//                configurations called "Release Exe" and "Debug Exe" that generate an
+//			      executable with all plugins statically linked in. The solution of an
+//				  application_plugin uses the new configurations by default in the static
+//				  solution configurations "Release" and "Debug". When an application_plugin
+//				  is a dependent plugin of another application_plugin, the other solution uses
+//				  the "Release" and "Debug" configurations of the application_plugin to link
+//				  it into the other executable.
+// - "tool" ... executable used during the build process like ppp
+// - "test" ... plugin to the tester tool that provides boolean functions to test code
+//if not specified, the projectType defaults to "plugin"
+
+projectType = "library";
+
+
+//name of project defaults to INPUT_NAME without extension
+
+projectName = "my_project";
+
+//list of individual source files that must be specified with full path
+
+sourceFiles = [INPUT_DIR."my_source.cxx", INPUT_DIR."my_resource.png"];
+
+
+//Specify a list of files that should be excluded from the project.
+//The files must be specified by the same path as in the sourceDirs. 
+//If you specify INPUT_PATH, the "*.pj"-file is excluded from the project.
+//
+//If a file is listed in sourceFiles AND excludeSourceFiles it is INCLUDED.
+
+excludeSourceFiles = [INPUT_PATH];
+
+
+// Several source files with the same name (excluding extension) in a single project
+// are auto asigned the same object file yielding linking problems. To avoid this one
+// can rename the object file of sources files by defining the list renameObjectFiles
+// of pairs of source file name (with extension) and object file name (without extension).
+// In the following example the source files INPUT_DIR."/openal-soft/alc/backends/null.cpp"
+// and INPUT_DIR."/openal-soft/alc/effects/null.cpp" are compiled to alc_backends_null.obj
+// and alc_effects_null.obj instead of both to null.obj (in openal_soft there is a third
+// source file null.cpp whose object file name is not changed):
+
+renameObjectFiles=[
+	[ INPUT_DIR."/openal-soft/alc/backends/null.cpp", "alc_backends_null" ],
+	[ INPUT_DIR."/openal-soft/alc/effects/null.cpp", "alc_effects_null" ]
+];
+
+
+//list of directories that are scanned recursively for source files, 
+//defaults to empty list [] if sourceFiles are defined or to [INPUT_DIR] if 
+//sourceFiles is not defined
+
+sourceDirs = [INPUT_DIR."/my_subdir"];
+
+
+//specify subdirs in the source directories that should be excluded
+
+excludeSourceDirs = [];
+
+
+// define additional directories, in which project files are located. 
+// By default the directories CGV_DIR/cgv, CGV_DIR/apps and CGV_DIR/tool
+// are project directories.
+
+addProjectDirs = [
+	CGV_DIR."/3rd", 
+	CGV_DIR."/plugins", 
+	CGV_DIR."/libs", 
+	env::CGV_SUPPORT_DIR."/plugins"];
+	
+
+//Define projects on which this project depends. All projects that are
+//handled by the cgv-framework need to be added as addProjectDeps and
+//not as addDependencies even if the resulting libraries are installed
+//on the system. Please add the following libraries which are installed
+//under linux to addProjectDeps:
+//- zlib
+//- libjpeg
+//- libpng
+//- libtiff
+//- fltk
+//- glew
+//ppp will automatically classify them as dependencies under linux and
+//as dependent projects under windows.
+//
+//If a plugin depends on an application, this application 
+//is used as executable for running and debugging the plugin.
+//
+//A "test" project is always dependent on the "tester" tool.
+//Default dependencies are the tools used during the build process.
+//The tool projects specified in the rules are added to the solution 
+//recursively.
+
+addProjectDeps = ["cgv","cgv_viewer","fltk"];
+
+// By default all projects on which this project depends are included to the workspace (solution).
+// By setting "referenceDeps" to 0, only the workspace only contains this project. This feature is
+// currently only supported for Visual Studio 2010 and works only in the shared version of application
+// plugins as all registration code of statically compiled plugins is discarded when the plugin is not
+// included in the solution.
+
+referenceDeps = 0;
+
+
+// working directory in which the resulting program should be started
+// this defaults to the platform specific default directories
+
+workingDirectory = INPUT_DIR;
+
+
+//additional include paths, which are appended to the default paths
+//that include CGV_DIR and the list of paths defined in the INCLUDE
+//environment variable that are automatically recognized by the compiler.
+//To export include paths to projects that depend on this project, specify
+//the include path in a list of two strings with the second entry equal to "all"
+
+addIncDirs = [ INPUT_DIR."/my_include_subdir", 
+               [ env::CGV_SUPPORT_DIR."/libs/capture", "all"] 
+             ];
+
+// define shader paths added by the current project.
+// To export a shader paths to projects that depend on this project, specify
+// the shader path in a list of two strings with the second entry equal to "all".
+// The list of all shader paths per project is computed after all dependent projects 
+// have been read. You can refer to this list in the addCommandLineArguments with the string "SHADER_PATHS".
+
+addShaderPaths = [ 
+	INPUT_DIR."/private_glsl", 
+	[ INPUT_DIR."/public_glsl", "all"] 
+];
+
+// add additional command line arguments. Use the predefined functions after(argument, plugin) 
+// and "before(argument,plugin)" to place an argument after or before the command line argument
+// reading the given plugin. The most common usage of this is to add a default config file and 
+// the shader paths after the ui plugin as in the given example. The shader path argument is of
+// the form "type(shader_config):shader_path='PATH1;PATH2;...;PATHN'" and automatically assembled
+// by concatenating the shader path lists added in the current project with 
+// addShaderPaths=["PATH1","PATH2",...] and the shader paths exported by dependent project with
+// addShaderPaths=[ ["PATH1","all"], ...].
+
+addCommandLineArguments = [
+	'config:"'.INPUT_DIR.'/my_config.def"',
+	after("SHADER_PATHS", "cg_fltk")
+];
+
+//additional preprocessor definitions for all configurations. By default the
+//following symbols are defined:
+// - INPUT_DIR ... is defined to the input directory of the project
+// - CGV_DIR ... is defined to the cgv directory active during compilation
+//Both predefined paths come without enclosing double quotes. You can use the
+//macro QUOTE_SYMBOL_VALUE defined in <cgv/defines/quote.h> to enclose the directories
+//in double quotes.
+// 
+//To export defines to projects that depend on this project, specify
+//the define in a list of two strings with the second entry equal to "all"
+
+addDefines = ["LOCAL_DEFINE", ["EXPORTED_DEFINE", "all"] ];
+
+
+//additional preprocessor definitions for shared configurations
+//To export shared defines to projects that depend on this project, specify
+//the shared define in a list of two strings with the second entry equal to "all"
+
+addSharedDefines = ["CGV_FORCE_EXPORT", ["FL_SHARED", "all"] ];
+
+
+//additional preprocessor definitions for static configurations
+//To export static defines to projects that depend on this project, specify
+//the static define in a list of two strings with the second entry equal to "all"
+
+addStaticDefines = [];
+
+
+//additional library paths. The default library paths include
+//CGV_DIR/lib and the path list defined in the environment 
+//variable LIBRARIES that is automatically recognized by the
+//linker. 
+//To export lib dirs to projects that depend on this project, specify
+//the lib dir in a list of two strings with the second entry equal to "all"
+
+addLibDirs=["regular_lib_dir", ["exported_lib_dir", "all"] ];
+
+
+//define a dependency by specification of a configuration specific library name either
+//for current project only or to be exported to all dependent projects
+addMapDeps = [
+	[ "testlib2", ["testlib1_s10","testlib1_sd10","testlib1_10","testlib1_d10"] ],
+	[ ["testlib1", ["testlib1_s10","testlib1_sd10","testlib1_10","testlib1_d10"] ], "all" ]
+];
+
+
+//external libraries on which the project depends. If one project
+//depends on another, it is sufficient to add the project to the
+//addProjectDeps list without entry in addDendencies. As library names
+//are platform dependent, the platform and configuration specific
+//library names of the following libraries are tabulated and translated
+//from the given name correctly:
+// - "opengl"
+// - "glu"
+// - "glew"
+//In order to extend the translation mapping use the syntax addMapDeps variable
+//
+//The library paths to the corresponding libs need to be present
+//in the environment variable LIBRARIES or need to be added with a 
+//addLibDirs declaration.
+//
+//To export dependencies to projects that depend on this project, specify
+//the dependency in a list of two strings with the second entry equal to 
+// - "static" ... dependency exported only to static configurations 
+// - "shared" ... dependency exported only to shared configurations 
+// - "all"    ... dependency exported to all configurations
+
+addDependencies = ["opengl","glu","glew",["Vfw32", "static"] ];
+
+// enable openmp support by the following line (default value is 0 or 1 if env::CGV_OPTIONS containts OPENMP)
+useOpenMP = 1;
+
+// set the C++ language standard to "stdcpp11", "stdcpp14" "stdcpp17", or "stdcpp20" by the following line,
+//     which defaults to empty, or "stdcpp17|stdcpp20" if env::CGV_OPTIONS contains STDCPP17|STDCPP20
+cppLanguageStandard = "stdcpp20";
+
+// overwrite windows character set used to encode string, which defaults to "Unicode" or if set env::CGV_CHARSET
+charset = "MultiByte";
+
+// overwrite windows subsystem used for linking of executables, which defaults to "Console"
+subsystem = "Windows";
+
+//set the name of the definition file, in which the symbols are 
+//defined that should be exported in a dll which has been implemented
+//with extern "C" declarations. An example usage is in the project
+//file for libtiff.
+
+defFile = INPUT_PATH."/my_definition_file.def";
+
+//DEPRECATED as the current version of the make file generation allows
+//to generate rule files also via the addRules variable.
+//
+//Add the entries of the given list as rule files to the project.
+//To export a rule file to projects that depend on this project, specify
+//the rule file in a list of two strings with the second entry equal to "all"
+addRuleFiles=[];
+
+
+//Add new rules that specify how to handle extensions during makefile
+//generation. Each rule is defined by a MAP with the following entries:
+// - extensions : LIST of STRING  ... list of extensions covered by this rule
+// - folder : STRING              ... project folder into which the corresponding 
+//                                    files should be sorted
+// - excl_cfg_idxs : LIST of INT  ... list of configuration indices for which the rule
+//                                    should not be applied. The following indices can be used:
+//                                    0 ... Release
+//                                    1 ... Debug
+//                                    2 ... Release Dll
+//                                    3 ... Debug Dll
+//                                    4 ... Release Exe (for application plugins)
+//                                    5 ... Debug Exe (for application plugins)
+// - tool : optional STRING       ... project name of tool used to transform the file
+// - rules : optional LIST of MAP ... list of rules to be applied to the source file in order 
+//                                    to generate new source files. Each list entry of type
+//                                    MAP can have the following entries:
+//   - keep_extension : optional BOOL ... whether to keep extension of source file name
+//   - suffix : optional STRING ... suffix added to the source file name before adding the extension
+//   - extension : STRING ... extension of file generated with the tool from the source file
+//   - path : STRING ... path to the directory where the generated file can be found
+//   - command_line : LIST of STRING/INT ... list of components of the command line to be executed by
+//                                    the rule. First entry defines the command. Other entries of type 
+//                                    STRING are directly used. Integer entries correspond to
+//                                    0 ... input file
+//                                    1 ... first rule target
+//                                    2 ... second rule target
+//                                    3 ... etc
+addRules=[];
+
+// visual studio supports CUDA for the x64 plattform through special project properties 
+// and targets. CUDA support can be turned on for a project by setting cudaEnabled = TRUE.
+// This extracts the CUDA version from env::CUDA_PATH and adds rules for the
+// extensions "cu" and "cuh" which put corresponding files in the "cuda" and
+// "cuda_headers" visual studio project folders and uses CudaCompile for cu-files.
+//
+// The cuda compiler nvcc can compile code into a compute architecture specific text file *.ptx
+// and from this to binary code for specific real GPUs stored in *.cubin files. Furthermore, nvcc can
+// create multiple cubin and ptx files in one call and pack them into a *.fatbin file. Finally, the
+// ptx, cubin, and fatbin files can all be integrated in obj files by incoporating C++ declarations 
+// into an intermediate C++ file. 
+// Ppp cuda support defaults to the latter incorporation strategy and code generation is controlled 
+// through the projects cudaCodeGeneration variable in multiple possible ways:
+//
+// cudaCodeGeneration = "all"; 
+//     ... compiles to all possible platforms (takes long and gives huge libs/exes; only works if 
+//                                             implementation supports all architectures)
+// cudaCodeGeneration = "native";
+//     ... compiles to these GPUs that are installed in the computer used for compilation 
+//         (has fastest compilation and leads to smallest libs/exes; therefore this is the default setting)
+// cudaCodeGeneration = MAP.[["architecture","sm_75"]];
+//     ... compiles to compute_75 ptx and sm_75 native code
+// cudaCodeGeneration = MAP.[["architecture","compute_75"], ["code","sm_75"]];
+//     ... compiles to sm_75 cubin using compute_75 architecture for preprocessing
+// cudaCodeGeneration = MAP.[["architecture","compute_75"], [code, ["sm_75, "compute_75", "sm_80"] ] ];
+//     ... compiles to compute_75 ptx as well as to sm_75 cubin and sm_80 cubin using compute_75 
+//         architecture for preprocessing
+//
+// The possible compute architecture are of the form "compute_??" and the real GPUs of form "sm_??".
+// The 2 digit number ?? describes for compute architecture as well as for real GPUs the supported feature:
+//  - Maxwell ... 50|52|53
+//  - Pascal  ... 60|61|62
+//  - Volta   ... 70|72
+//  - Turing  ... 75
+//  - Ampere  ... 80|86|87
+//  - Ada     ... 89
+//  - Hopper  ... 90|90a
+// The architecture number must be smaller or equal than all the code numbers.
+//
+// Ppp automatically specifies nvcc compiler options to synch the C++ standard with the cc compiler 
+// and the options for the host compiler (-Xcompiler). Further options can be specified per project
+// space separated in the string variable cudaOptions. Typical options to choose from are
+//
+// cudaOptions = "--verbose --extended-lambda --expt-relaxed-constexpr --use_fast_math -dopt=on";
+// 
+// CUDA support variables default to the following settings:
+cudaEnabled = FALSE;
+cudaOptions = "";
+cudaCodeGeneration = "native";

@@ -1,0 +1,53 @@
+#version 330
+
+in vec4 color_fs;
+
+layout(location = 1) out vec4 frag_position;
+layout(location = 2) out vec3 frag_normal;
+
+//***** begin interface of ellipsoid_base.glfs ****************************
+bool compute_ellipsoid_intersection(out float depth, out vec3 p_eye, out vec3 n_eye, bool show_backside);
+//***** end interface of ellipsoid_base.glfs ******************************
+
+//***** begin interface of side.glsl ***********************************
+uniform int culling_mode = 0;
+//***** end interface of side.glsl ***********************************
+
+//***** begin interface of fragment.glfs ***********************************
+void finish_fragment(vec4 color, float depth);
+//***** end interface of fragment.glfs ***********************************
+
+//***** begin interface of surface.glsl ***********************************
+struct Material {
+	int brdf_type;
+	vec3 diffuse_reflectance;
+	float roughness;
+	float metalness;
+	float ambient_occlusion;
+	vec3 emission;
+	float transparency;
+	vec2 propagation_slow_down;
+	float roughness_anisotropy;
+	float roughness_orientation;
+	vec3 specular_reflectance;
+};
+
+vec4 compute_reflected_radiance(in Material M, vec3 position_eye, vec3 normal_eye);
+vec4 compute_reflected_appearance(vec3 position_eye, vec3 normal_eye, vec4 color_fs, int side);
+vec4 compute_reflected_appearance_texture(vec3 position_eye, vec3 normal_eye, vec2 texcoords, vec4 color_fs, int side);
+//***** end interface of surface.glsl ***********************************
+void main()
+{
+	float depth;
+	vec3 p_eye;
+	vec3 n_eye;
+	bool cull_frontface = culling_mode == 2;
+	if (compute_ellipsoid_intersection(depth, p_eye, n_eye, cull_frontface)) {
+		vec4 color = compute_reflected_appearance(p_eye, n_eye, color_fs, 1);
+		finish_fragment(color, depth);
+		frag_position = vec4(p_eye, 1.0);
+		frag_normal = n_eye;
+	} else {
+		discard;
+	}
+}

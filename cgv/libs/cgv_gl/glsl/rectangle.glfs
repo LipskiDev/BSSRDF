@@ -1,0 +1,129 @@
+#version 330 core
+
+uniform bool use_texture = false;
+// 0 ... replace (color.rgba = texture.rgba)
+// 1 ... replace alpha (color.a = texture.r)
+// 2 ... multiply color (color.rgba*texture.rgba)
+// 3 ... multiply border_color (border_color.rgba*texture.rgba)
+// 4 ... mix color and border_color, 
+// 5 ... mix border_color and color,
+// 6 ... mix color and border_color with red texture component
+// 7 ... mix border_color and color with red texture component
+uniform int texture_mode = 0;
+uniform sampler2D tex;
+
+in RECTANGLE_FS {
+	vec3 position_eye;
+	vec3 normal_eye;
+	vec2 texcoord;
+	vec4 color;
+	vec4 secondary_color;
+	vec4 border_color;
+	float depth_offset;
+	flat int side; // 0 is back facing and 1 is front facing
+	vec2 splatcoord;
+	vec2 percentual_splat_size;
+	vec2 percentual_blend_width;
+	vec2 percentual_rectangle_size;
+	vec2 percentual_core_size;
+} fi;
+
+layout(location = 1) out vec4 frag_position;
+layout(location = 2) out vec3 frag_normal;
+
+//***** begin interface of fragment.glfs ***********************************
+uniform float gamma = 2.2;
+void finish_fragment(vec4 color);
+void finish_fragment(vec4 color, float depth);
+//***** end interface of fragment.glfs ***********************************
+
+//***** begin interface of surface.glsl ***********************************
+vec4 compute_reflected_appearance(vec3 position_eye, vec3 normal_eye, vec4 color, int side);
+//***** end interface of surface.glsl ***********************************
+
+/// compute fragment color of point splat with halo
+vec4 compute_blended_color_with_halo(
+	in float percentual_radial_position,
+	in vec4 core_color, in float percentual_core_size,
+	in vec4 halo_color, in float percentual_point_size,
+	in float percentual_blend_width);
+
+float compute_lambda(in float min_value1, in float max_value1, in float min_value2, in float max_value2)
+{
+	return max(min(max_value1, max_value2) - max(min_value1, min_value2), 0.0);
+}
+
+float is_inside(in float value1, float min_value2, float max_value2)
+{
+	return (value1 >= min_value2 && value1 < max_value2) ? 1.0 : 0.0;
+}
+
+vec3 compute_blended_factors(in float percentual_radial_position, in float percentual_core_size,
+	                         in float percentual_point_size,      in float percentual_blend_width)
+{
+	percentual_blend_width *= 0.5;
+	float min_value1 = percentual_radial_position - 0.5*percentual_blend_width;
+	float max_value1 = percentual_radial_position + 0.5*percentual_blend_width;
+	
+	float core_blend_size = (1.0-0.5*percentual_blend_width)*percentual_core_size;
+	float point_blend_size = (1.0-0.5*percentual_blend_width)*percentual_point_size;
+	float border_fac = mix(1.0, 1.05, abs(core_blend_size - point_blend_size));
+
+	vec3 lambda;
+	if (percentual_blend_width > 0.0) {
+		lambda[0] = compute_lambda(min_value1, max_value1, -point_blend_size,  point_blend_size);
+		lambda[1] = compute_lambda(min_value1, max_value1, -core_blend_size,   core_blend_size);
+		lambda[2] = compute_lambda(min_value1, max_value1, -border_fac*point_blend_size, -core_blend_size)
+		          + compute_lambda(min_value1, max_value1,  core_blend_size,   border_fac*point_blend_size);
+
+		lambda /= percentual_blend_width;
+	}
+	else {
+		lambda[0] = is_inside(percentual_radial_position, -point_blend_size, point_blend_size);
+		lambda[1] = is_inside(percentual_radial_position, -core_blend_size, core_blend_size);
+		lambda[2] = is_inside(abs(percentual_radial_position), core_blend_size, point_blend_size);
+		if (lambda[1]+lambda[2] > 1.0)
+			lambda *= 0.5;
+	}
+	return clamp(lambda, 0.0, 1.0);
+}
+
+void main()
+{
+	vec4 core_color = fi.color;
+	if (use_texture) {
+		core_color = texture(tex, fi.texcoord);
+		switch (texture_mode) {
+		case 1 : core_color = vec4(fi.color.rgb, core_color.r); break;
+		case 2 : core_color *= fi.color; break;
+		case 3 : core_color *= fi.secondary_color; break;
+		case 4 : core_color *= fi.border_color; break;
+		case 5 : core_color = mix(fi.color, fi.secondary_color, core_color); break;
+		case 6 : core_color = mix(fi.color, fi.border_color, core_color); break;
+		case 7 : core_color = mix(fi.secondary_color, fi.color, core_color); break;
+		case 8 : core_color = mix(fi.border_color, fi.color, core_color); break;
+		case 9 : core_color = mix(fi.color, fi.secondary_color, core_color.r); break;
+		case 10 : core_color = mix(fi.color, fi.border_color, core_color.r); break;
+		case 11 : core_color = mix(fi.secondary_color, fi.color, core_color.r); break;
+		case 12 : core_color = mix(fi.border_color, fi.color, core_color.r); break;
+		}
+	}
+	vec3 u = compute_blended_factors(fi.splatcoord[0], fi.percentual_core_size[0], fi.percentual_rectangle_size[0], fi.percentual_blend_width[0]);
+	vec3 v = compute_blended_factors(fi.splatcoord[1], fi.percentual_core_size[1], fi.percentual_rectangle_size[1], fi.percentual_blend_width[1]);
+
+	// previous blend oparation
+	//vec4 color = u[1]*v[1]*core_color + (u[2]*(v[1]+v[2])+u[1]*v[2])*fi.border_color;
+
+	float point_alpha = u[0]*v[0];
+	float border_mix = clamp(u[2]*(v[1]+v[2])+u[1]*v[2], 0.0, 1.0);
+
+	vec4 color = mix(core_color, fi.border_color, border_mix);
+	color.a *= point_alpha;
+
+	frag_position = vec4(fi.position_eye, 1.0);
+	frag_normal = fi.normal_eye;
+
+	// illumination
+	color = compute_reflected_appearance(fi.position_eye, normalize(fi.normal_eye), color, fi.side);
+	finish_fragment(color, gl_FragCoord.z+fi.depth_offset);
+}

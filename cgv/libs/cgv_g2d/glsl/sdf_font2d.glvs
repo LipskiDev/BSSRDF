@@ -1,0 +1,67 @@
+#version 330
+
+//***** begin interface of quaternion.glsl ***********************************
+vec4 unit_quaternion();
+vec3 rotate_vector_with_quaternion(in vec3 preimage, in vec4 q);
+vec3 inverse_rotate_vector_with_quaternion(in vec3 v, in vec4 q);
+void quaternion_to_axes(in vec4 q, out vec3 x, out vec3 y, out vec3 z);
+void quaternion_to_matrix(in vec4 q, out mat3 M);
+void rigid_to_matrix(in vec4 q, in vec3 t, out mat4 M);
+//***** end interface of quaternion.glsl ***********************************
+
+//***** begin interface of shape2d.glsl ***********************************
+uniform bool origin_top_left = false;
+vec4 transform_world_to_window_space(vec2 p);
+//***** end interface of shape2d.glsl ***********************************
+
+const vec2 corners[4] = vec2[](
+	vec2(0.0, 0.0),
+	vec2(1.0, 0.0),
+	vec2(0.0, 1.0),
+	vec2(1.0, 1.0)
+);
+
+struct vertex {
+	vec4 position_size;
+	vec4 texcoords;
+};
+
+layout(location = 0) in vec4 quad;
+layout(location = 1) in vec4 texcoord;
+
+uniform float font_size = 32.0;
+uniform vec2 text_size;
+uniform vec3 translation;
+uniform vec4 rotation;
+uniform vec2 percentual_offset;
+
+out vec2 tex_coord;
+
+void main() {
+	// interpolate local vertex position and texture coordinates based on corner
+	vec2 corner = corners[gl_VertexID];
+	vec2 position = mix(quad.xy, quad.zw, corner);
+	tex_coord = mix(texcoord.xy, texcoord.zw, corner);
+
+	vec2 adjusted_percentual_offset = percentual_offset;
+	if(origin_top_left) {
+		position.y = -position.y;
+		adjusted_percentual_offset.y = -adjusted_percentual_offset.y;
+	}
+
+	// compute total scale factor from font size and text scale
+	vec2 scale = font_size * text_size;
+
+	// scale normalized position by scale factor
+	position *= scale.y;
+
+	// offset local glyph position by text alignment
+	position += scale * adjusted_percentual_offset;
+	
+	// transform vertex according to text translation and rotation
+	mat4 T;
+	rigid_to_matrix(rotation, translation, T);
+	position = (T * vec4(position, 0.0, 1.0)).xy;
+	
+	gl_Position = transform_world_to_window_space(position);
+}

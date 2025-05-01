@@ -1,0 +1,113 @@
+#version 330
+#extension GL_EXT_geometry_shader4 : enable
+
+#define ROUNDING 0
+
+layout(points) in;
+layout(triangle_strip, max_vertices = 24) out;
+
+in mat3 NM[];
+in mat4 PM[];
+in vec4 color_gs[];
+
+#if ROUNDING == 1
+in vec3 extent_gs[];
+in vec4 secondary_color_gs[];
+in mat4 iPM[];
+in mat3 iNM[];
+in float radius_gs[];
+#endif
+
+out vec3 normal;
+out vec4 color_fs;
+out vec3 position;
+flat out int side;
+
+#if ROUNDING == 1
+out vec3 pos_box;
+out vec3 eye_box;
+out mat3 NM_fs;
+out vec3 extent;
+out float radius;
+out vec4 secondary_color;
+#endif
+
+//***** begin interface of side.glsl ***********************************
+bool keep_this_side(in vec3 position, in vec3 normal, out int side);
+void update_material_color_and_transparency(inout vec3 mat_color, inout float transparency, in int side, in vec4 color);
+void update_normal(inout vec3 normal, in int side);
+//***** end interface of side.glsl ***********************************
+
+//***** begin interface of view.glsl ***********************************
+mat4 get_modelview_matrix();
+mat4 get_projection_matrix();
+mat4 get_modelview_projection_matrix();
+mat4 get_inverse_modelview_matrix();
+mat4 get_inverse_modelview_projection_matrix();
+mat3 get_normal_matrix();
+mat3 get_inverse_normal_matrix();
+//***** end interface of view.glsl ***********************************
+
+void emit_face(in vec3 normal_in, in vec4 c0, in vec4 c1, in vec4 c2, in vec4 c3)
+{
+	color_fs = color_gs[0];
+	// compute eye space normal and first corner position
+	normal = normal_in;
+	position = c0.xyz;
+
+	// determine side in eye space and check for culling
+	if (!keep_this_side(position, normal, side))
+		return;
+
+	// emit face
+#if ROUNDING == 1
+	pos_box = (iPM[0]*c0).xyz;
+#endif
+	position = c0.xyz;
+	gl_Position = get_projection_matrix() * c0;
+	EmitVertex();
+#if ROUNDING == 1
+	pos_box = (iPM[0]*c1).xyz;
+#endif
+	position = c1.xyz;
+	gl_Position = get_projection_matrix() * c1;
+	EmitVertex();
+#if ROUNDING == 1
+	pos_box = (iPM[0]*c2).xyz;
+#endif
+	position = c2.xyz;
+	gl_Position = get_projection_matrix() * c2;
+	EmitVertex();
+#if ROUNDING == 1
+	pos_box = (iPM[0]*c3).xyz;
+#endif
+	position = c3.xyz;
+	gl_Position = get_projection_matrix() * c3;
+	EmitVertex();
+	EndPrimitive();
+}
+
+void main()
+{
+#if ROUNDING == 1
+	NM_fs = NM[0];
+	extent = extent_gs[0];
+	eye_box = (iPM[0]*vec4(0.0,0.0,0.0, 1.0)).xyz;
+	radius = radius_gs[0];
+	secondary_color = secondary_color_gs[0];
+#endif
+	vec4 C0 = PM[0] * vec4(-0.5, -0.5, -0.5, 1.0);
+	vec4 C1 = PM[0] * vec4(0.5, -0.5, -0.5, 1.0);
+	vec4 C2 = PM[0] * vec4(-0.5, 0.5, -0.5, 1.0);
+	vec4 C3 = PM[0] * vec4(0.5, 0.5, -0.5, 1.0);
+	vec4 C4 = PM[0] * vec4(-0.5, -0.5, 0.5, 1.0);
+	vec4 C5 = PM[0] * vec4(0.5, -0.5, 0.5, 1.0);
+	vec4 C6 = PM[0] * vec4(-0.5, 0.5, 0.5, 1.0);
+	vec4 C7 = PM[0] * vec4(0.5, 0.5, 0.5, 1.0);
+	emit_face(NM[0] * vec3(-1.0, 0.0, 0.0), C0, C4, C2, C6);
+	emit_face(NM[0] * vec3(1.0, 0.0, 0.0), C5, C1, C7, C3);
+	emit_face(NM[0] * vec3(0.0, -1.0, 0.0), C0, C1, C4, C5);
+	emit_face(NM[0] * vec3(0.0, 1.0, 0.0), C3, C2, C7, C6);
+	emit_face(NM[0] * vec3(0.0, 0.0, -1.0), C0, C2, C1, C3);
+	emit_face(NM[0] * vec3(0.0, 0.0, 1.0), C6, C4, C7, C5);
+}

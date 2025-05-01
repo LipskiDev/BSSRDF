@@ -1,0 +1,198 @@
+#version 150
+#extension GL_EXT_geometry_shader4 : enable
+
+layout(points) in;
+layout(triangle_strip, max_vertices = 14) out;
+
+in vec3 p0_gs[];
+in vec3 pm_gs[];
+in vec3 p1_gs[];
+in vec4 color_gs[];
+in float radius_gs[];
+in float head_radius_gs[];
+
+out vec3 position;
+out vec3 t;
+out vec3 p0_fs;
+out vec3 pm_fs;
+out vec3 p1_fs;
+out vec3 p_eye;
+out vec3 n_eye;
+out vec4 color_fs;
+out float radius_fs;
+out float head_radius_fs;
+
+//***** begin interface of view.glsl ***********************************
+mat4 get_modelview_matrix();
+mat4 get_projection_matrix();
+mat4 get_modelview_projection_matrix();
+mat4 get_inverse_modelview_matrix();
+mat4 get_inverse_modelview_projection_matrix();
+mat3 get_normal_matrix();
+mat3 get_inverse_normal_matrix();
+//***** end interface of view.glsl ***********************************
+
+void generate_vertex(in vec3 p)
+{
+	vec4 hp = vec4(p, 1.0);
+	vec4 hp_eye = get_modelview_matrix() * hp;
+	p_eye = hp_eye.xyz / hp_eye.w;
+	gl_Position = get_modelview_projection_matrix() * hp;
+	EmitVertex();
+}
+
+void generate_vertex1(in vec3 p, in vec3 n)
+{
+	n_eye = get_normal_matrix() * n;
+	generate_vertex(p);
+}
+
+void generate_triangle1(in vec3 p0, in vec3 n0, in vec3 p1, in vec3 n1, in vec3 p2, in vec3 n2, in vec4 color)
+{
+	color_fs = color;
+	generate_vertex1(p0,n0);
+	generate_vertex1(p1,n1);
+	generate_vertex1(p2,n2);
+	EndPrimitive();
+}
+
+void generate_triangle(in vec3 p0, in vec3 p1, in vec3 p2, in vec3 n, in vec4 color)
+{
+	color_fs = color;
+	n_eye = get_normal_matrix() * n;
+	generate_vertex(p0);
+	generate_vertex(p1);
+	generate_vertex(p2);
+	EndPrimitive();
+}
+void generate_quad(in vec3 p0, in vec3 p1, in vec3 p2, in vec3 p3, in vec3 n0, in vec3 n1, in vec4 color)
+{
+	color_fs = color;
+	generate_vertex1(p0, n0);
+	generate_vertex1(p1, n1);
+	generate_vertex1(p2, n0);
+	generate_vertex1(p3, n1);
+	EndPrimitive();
+}
+
+vec3 ortho_vec(vec3 v) {
+
+	return abs(v.x) > abs(v.z) ? vec3(-v.y, v.x, 0.0f) : vec3(0.0f, -v.z, v.y);
+}
+
+void main()
+{
+	color_fs = color_gs[0];
+
+	radius_fs = radius_gs[0];
+	head_radius_fs = head_radius_gs[0];
+
+	vec3 start = p0_gs[0];
+	vec3 end = p1_gs[0];
+
+	vec3 delta = end - start;
+	float l = length(delta);
+	delta /= l;
+
+	float max_d = 2.0 * max(radius_fs, head_radius_fs);
+
+	vec3 center = 0.5 * (start + end);
+
+	// create transformation matrix as modelview * translation * rotation * scale
+	// rotation part
+	mat4 T = mat4(1.0);
+	T[0] = vec4(delta, 0.0);
+	T[1] = vec4(normalize(ortho_vec(delta)), 0.0);
+	T[2] = vec4(cross(delta, T[1].xyz), 0.0);
+	T[3] = vec4(center, 1.0); // translation part
+
+	// get tangent frame from rotation matrix before scaling is applied
+	//normal_fs = T[1].xyz;
+	//binormal_fs = T[2].xyz;
+
+	// scale part
+	T[0] *= l;
+	T[1] *= max_d;
+	T[2] *= max_d;
+
+	// transform to eye space
+	mat4 M = get_modelview_matrix() * T;
+
+	p0_fs = start;
+	p1_fs = end;
+	pm_fs = pm_gs[0];
+
+	vec4 C0 = M * vec4(-0.5, -0.5, -0.5, 1.0);
+	vec4 C1 = M * vec4(0.5, -0.5, -0.5, 1.0);
+	vec4 C2 = M * vec4(-0.5, 0.5, -0.5, 1.0);
+	vec4 C4 = M * vec4(-0.5, -0.5, 0.5, 1.0);
+
+	// calculate remaining corners
+	vec4 D20 = C2 - C0;
+
+	vec4 C3 = C1 + D20;
+	vec4 C5 = C1 + C4-C0;
+	vec4 C6 = C4 + D20;
+	vec4 C7 = C5 + D20;
+
+	
+	mat4 PM = get_projection_matrix();
+
+	position = C6.xyz;
+	gl_Position = PM * C6;
+	EmitVertex();
+
+	position = C7.xyz;
+	gl_Position = PM * C7;
+	EmitVertex();
+
+	position = C4.xyz;
+	gl_Position = PM * C4;
+	EmitVertex();
+
+	position = C5.xyz;
+	gl_Position = PM * C5;
+	EmitVertex();
+
+	position = C1.xyz;
+	gl_Position = PM * C1;
+	EmitVertex();
+
+	position = C7.xyz;
+	gl_Position = PM * C7;
+	EmitVertex();
+	
+	position = C3.xyz;
+	gl_Position = PM * C3;
+	EmitVertex();
+	
+	position = C6.xyz;
+	gl_Position = PM * C6;
+	EmitVertex();
+	
+	position = C2.xyz;
+	gl_Position = PM * C2;
+	EmitVertex();
+	
+	position = C4.xyz;
+	gl_Position = PM * C4;
+	EmitVertex();
+	
+	position = C0.xyz;
+	gl_Position = PM * C0;
+	EmitVertex();
+	
+	position = C1.xyz;
+	gl_Position = PM * C1;
+	EmitVertex();
+	
+	position = C2.xyz;
+	gl_Position = PM * C2;
+	EmitVertex();
+	
+	position = C3.xyz;
+	gl_Position = PM * C3;
+	EmitVertex();
+
+	EndPrimitive();
+}

@@ -1,0 +1,20 @@
+# Ignore Build output
+cmake-build*
+build
+
+# Ignore Visual Studio files
+*.vs
+Debug
+Release
+ipch
+
+# Ignore VS Code configuration
+.vscode
+
+# Ignore JetBrains configurations
+.idea
+.run
+
+build
+cmake-build
+.cache

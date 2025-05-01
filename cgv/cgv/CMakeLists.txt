@@ -1,0 +1,18 @@
+
+add_subdirectory(base)
+add_subdirectory(data)
+add_subdirectory(gui)
+add_subdirectory(math)
+add_subdirectory(media)
+add_subdirectory(os)
+add_subdirectory(ppp)
+add_subdirectory(reflect)
+add_subdirectory(render)
+add_subdirectory(signal)
+add_subdirectory(type)
+add_subdirectory(utils)
+
+install(EXPORT cgv DESTINATION ${CGV_BIN_DEST})
+install(DIRECTORY . DESTINATION ${CGV_INCLUDE_DEST} FILES_MATCHING PATTERN "*.h")
+# TODO find out why there are *.hh files (maybe rename them to *.h)
+install(DIRECTORY . DESTINATION ${CGV_INCLUDE_DEST} FILES_MATCHING PATTERN "*.hh")

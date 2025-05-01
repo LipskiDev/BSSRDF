@@ -1,0 +1,103 @@
+#version 330 core
+
+uniform bool  has_rotations;
+uniform bool  has_translations;
+uniform bool  position_is_center = true;
+
+in vec4  position;
+in vec2  extent;
+in vec4  color;
+in vec4  secondary_color;
+in vec4  border_color;
+in vec3  border_info;
+in vec4  texcoord;
+in int   group_index;
+in vec4  rotation;
+in vec3  translation;
+in float depth_offset;
+
+out RECTANGLE_GS {
+	mat4  modelview;
+	vec3  normal_eye;
+	vec2  extent;
+	vec4  color;
+	vec4  secondary_color;
+	vec4  border_color;
+	float percentual_border_width;
+	float border_width_in_pixel; 
+	int   border_mode;
+	vec4  texcoord;
+	float depth_offset;
+} vo;
+
+//***** begin interface of quaternion.glsl ***********************************
+vec4 unit_quaternion();
+vec3 rotate_vector_with_quaternion(in vec3 preimage, in vec4 q);
+vec3 inverse_rotate_vector_with_quaternion(in vec3 v, in vec4 q);
+void quaternion_to_axes(in vec4 q, out vec3 x, out vec3 y, out vec3 z);
+void quaternion_to_matrix(in vec4 q, out mat3 M);
+void rigid_to_matrix(in vec4 q, in vec3 t, out mat4 M);
+//***** end interface of quaternion.glsl ***********************************
+
+//***** begin interface of group.glsl ***********************************
+vec4 group_color(in vec4 color, int group_index);
+vec3 group_transformed_position(in vec3 position, int group_index);
+vec3 group_transformed_normal(in vec3 nml, int group_index);
+void right_multiply_group_normal_matrix(inout mat3 NM, int group_index);
+void right_multiply_group_position_matrix(inout mat4 PM, int group_index);
+void right_multiply_group_normal_matrix_and_rotation(inout mat3 NM, int group_index, vec4 rotation);
+void right_multiply_group_position_matrix_and_rigid(inout mat4 PM, int group_index, vec4 rotation, vec3 translation);
+//***** end interface of group.glsl ***********************************
+
+//***** begin interface of view.glsl ***********************************
+mat4 get_modelview_matrix();
+mat4 get_projection_matrix();
+mat4 get_modelview_projection_matrix();
+mat4 get_inverse_modelview_matrix();
+mat4 get_inverse_modelview_projection_matrix();
+mat3 get_normal_matrix();
+mat3 get_inverse_normal_matrix();
+//***** end interface of view.glsl ***********************************
+
+void main()
+{
+	vo.color                   = group_color(color, group_index);
+	vo.secondary_color         = secondary_color;
+	vo.border_color            = border_color;
+	vo.texcoord                = texcoord;
+	vo.depth_offset            = depth_offset;
+	vo.border_width_in_pixel   = border_info.x; 
+	vo.percentual_border_width = border_info.y;
+	vo.border_mode             = int(border_info.z);
+	// compute modelview and normal transformation matrices
+	mat3 normal_matrix = get_normal_matrix();
+	if (has_rotations) {
+		right_multiply_group_normal_matrix_and_rotation(normal_matrix, group_index, rotation);
+	}
+	else {
+		right_multiply_group_normal_matrix(normal_matrix, group_index);
+	}
+	vo.normal_eye = normal_matrix*vec3(0.0, 0.0, 1.0);
+
+	// extract extent and center position
+	vec3 center_position;
+	if (position_is_center) {
+		vo.extent = extent;
+		center_position = position.xyz;
+	}
+	else {
+		vo.extent = extent-position.xy;
+		center_position = vec3(0.5*(position.xy+extent),position.z);
+	}
+	vo.modelview = get_modelview_matrix();
+	vec4 q;
+	if (has_rotations)
+		q = rotation;
+	else
+		q = unit_quaternion();
+	vec3 t = center_position;
+	if (has_translations)
+		t += translation;
+	right_multiply_group_position_matrix_and_rigid(vo.modelview, group_index, q, t);
+	gl_Position = vec4(vec3(0.0),1.0);
+}

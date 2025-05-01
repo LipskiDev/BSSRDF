@@ -1,0 +1,15 @@
+#version 330
+
+layout(location = 0) in vec2 position;
+layout(location = 1) in vec2 texcoord;
+layout(location = 2) in vec4 color;
+
+out vec2 texcoord_tc;
+out vec4 color_tc;
+
+void main()
+{
+	texcoord_tc = texcoord;
+	color_tc    = color;	
+	gl_Position = vec4(vec3(position,0.0),1.0);
+}
