@@ -95,6 +95,9 @@ void main()
     // define size vector
     vec3 size   = vec3(float(w), float(h), 1.0);
 
+    // Used for anaglyph rendering
+    mat4 m0, m1;
+
     // lookup input color and depth textures at current texture location
     float d_0 = texture(dep_tex_0, texcrd).x;
     float d_1 = texture(dep_tex_1, texcrd).x;
@@ -155,7 +158,14 @@ void main()
                   combine the color channels of each view in such a way that result in true anaglyph.
                   You can utilize the 'Y' variable for this. */
 
-             /*<your_code_here>*/
+            m0 = mat4(0.0);
+            m1 = mat4(0.0);
+            m0[0] = Y;
+            m1[2] = Y;
+
+            frag_color = vec4(transpose(m0) * c_0 + transpose(m1) * c_1);
+
+
 
             /***********************************************************************************/
             break;
@@ -166,6 +176,14 @@ void main()
                   You can utilize the 'Y' variable for this. */
 
              /*<your_code_here>*/
+            
+            m0 = mat4(0.0);
+            m1 = mat4(0.0);
+            m0[0] = Y;
+            m1[1] = Y;
+            m1[2] = Y;
+            frag_color = vec4(transpose(m0) * c_0 + transpose(m1) * c_1);
+             
 
             /***********************************************************************************/
             break;
@@ -178,7 +196,13 @@ void main()
                   combine the color channels of each view in such a way that result in true anaglyph.
                   You can utilize the 'Y' variable for this. */
 
-             /*<your_code_here>*/
+            m0 = mat4(0.0);
+            m1 = mat4(0.0);
+            m0[0] = Y;
+            m1[1][1] = 1.0;
+            m1[2][2] = 1.0;
+            frag_color = vec4(transpose(m0) * c_0 + m1 * c_1);
+
 
             /***********************************************************************************/
             break;
