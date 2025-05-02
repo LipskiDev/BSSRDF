@@ -664,14 +664,16 @@ public:
                   Use the variable 'cyclopic_lighting' to make it switch between both lightings */
 
 
-            float top = z_near * (screen_height / 2);
+            float top = (z_near / parallax_zero_depth) * (screen_height / 2);
             float bottom = -top;
 
             float eye_offset = eye * (eye_separation / 2);
             
-            float shift = eye_offset * z_near;
-            float right = z_near * (screen_width / 2) - shift;
-            float left = -z_near * (screen_width / 2) - shift;
+            float right = (z_near / parallax_zero_depth) * (screen_width / 2);
+            float left = -right;
+
+            right += 0.5 * eye_separation * screen_width * (z_near / parallax_zero_depth);
+            right -= 0.5 * eye_separation * screen_width * (z_near / parallax_zero_depth);
             
 
             cgv::mat4 P_frustum = cgv::mat4({
