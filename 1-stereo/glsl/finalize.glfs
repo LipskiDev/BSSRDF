@@ -26,6 +26,8 @@ uniform float parallax_scale;
 uniform int anaglyph_mode;
 
  /*<your_unforms_here>*/
+uniform float eye_separation;
+uniform float parallax_zero_depth;
 
 
 const vec4 Y = vec4(0.299, 0.587, 0.114, 0.0);
@@ -51,9 +53,13 @@ vec3 remap_window_coords(in vec3 window, in vec3 size, in mat4 T, out vec2 t)
           mat4 T      - transformation matrix from window coordinates of left/right view to clip
                         coordinates of rigth/left view*/
 
-     vec3 mapped_coord = window;
-     /*<your_code_here>*/
-     return mapped_coord;
+    vec3 mapped_coord = window;
+    vec3 NDC_l = vec3((2 / size.x) * (mapped_coord.x) - 1, (2 / size.y) * mapped_coord.y - 1, 2 * mapped_coord.z - 1);
+    vec4 clipped = T * vec4(NDC_l, 1);
+    vec3 NDC_r = (1 / clipped.w) * clipped.xyz;
+    vec2 p0_in_right = 0.5 * vec2(NDC_r.x + 1, NDC_r.y + 1);
+    t = p0_in_right;
+    return NDC_r;
 
     /************************************************************************************/
 }
@@ -84,9 +90,17 @@ bool check_visibility(in float d, in vec3 size, in mat4 T, in sampler2D other_de
           to make the comparison a bit more flexible. */
 
      /*<your_code_here>*/
+    d_remapped = texture(other_dep_tex, p_texcrd_in_other_image).r;
+
+    if(abs(d - d_remapped) < remap_epsilon) {
+        c_remapped = texture(other_col_tex, p_texcrd_in_other_image);
+    } else {
+        c_remapped = vec4(0.0549, 0.8392, 0.0275, 1.0);
+    }
+
 
     /************************************************************************************/
-
+#
     return true;
 }
 
@@ -146,6 +160,11 @@ void main()
               parallax_scale to adjust the transfer function from the UI. */
 
          /*<your_code_here>*/
+         if(image_idx == 0) {
+
+         } else {
+
+         }
 
         /***********************************************************************************/
         break;

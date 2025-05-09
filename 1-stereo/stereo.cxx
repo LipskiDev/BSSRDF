@@ -663,7 +663,7 @@ public:
                   matriices for cyclopic lighting.
                   Use the variable 'cyclopic_lighting' to make it switch between both lightings */
 
-
+            // TODO: fix frustum calculation
             float top = (z_near / parallax_zero_depth) * (screen_height / 2);
             float bottom = -top;
 
@@ -672,8 +672,8 @@ public:
             float right = (z_near / parallax_zero_depth) * (screen_width / 2);
             float left = -right;
 
-            right += 0.5 * eye_separation * screen_width * (z_near / parallax_zero_depth);
-            right -= 0.5 * eye_separation * screen_width * (z_near / parallax_zero_depth);
+            right -= 0.5 * eye * eye_separation * screen_width * (z_near / parallax_zero_depth);
+            left -= 0.5 * eye * eye_separation * screen_width * (z_near / parallax_zero_depth);
             
 
             cgv::mat4 P_frustum = cgv::mat4({
@@ -690,13 +690,21 @@ public:
                 eye_offset, 0, 0, 1
             });
 
+
+            cgv::mat4 S = cgv::mat4({
+                1, 0, 0, 0, 
+                0, 1, 0, 0,
+                -eye_offset / (float) parallax_zero_depth, 0, 1, 0,
+                0, 0, 0, 1
+            });
+
             cgv::mat4 MV = ctx.get_modelview_matrix();
 
             if(cyclopic_lighting) {
                 ctx.set_modelview_matrix(MV);
-                ctx.set_projection_matrix(P_frustum * T);
+                ctx.set_projection_matrix(T * S * P_frustum);
             } else {
-                ctx.set_modelview_matrix(T * MV);
+                ctx.set_modelview_matrix(T * S * MV);
                 ctx.set_projection_matrix(P_frustum);
             }
 
@@ -752,6 +760,8 @@ public:
         finalize_prog.set_uniform(ctx, "parallax_scale", parallax_scale);
         finalize_prog.set_uniform(ctx, "anaglyph_mode", (int&)anaglyph_mode);
         /*<your-uniforms-here>*/
+        finalize_prog.set_uniform(ctx, "eye_separation", eye_separation);
+        finalize_prog.set_uniform(ctx, "parallax_zero_depth", parallax_zero_depth);
 
         // renders the screen filling rectangle
         glDisable(GL_DEPTH_TEST);
