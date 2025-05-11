@@ -663,51 +663,39 @@ public:
                   matriices for cyclopic lighting.
                   Use the variable 'cyclopic_lighting' to make it switch between both lightings */
 
-            // TODO: fix frustum calculation
-            float top = (z_near / parallax_zero_depth) * (screen_height / 2);
-            float bottom = -top;
+            float n = z_near;
+            float f = z_far;
 
-            float eye_offset = eye * (eye_separation / 2);
-            
-            float right = (z_near / parallax_zero_depth) * (screen_width / 2);
-            float left = -right;
+            float l = -0.5f * screen_width * n / parallax_zero_depth;
+            float r = 0.5f * screen_width * n / parallax_zero_depth;
+            float t = 0.5f * screen_height * n / parallax_zero_depth;
+            float b = -0.5f * screen_height * n / parallax_zero_depth;
 
-            right -= 0.5 * eye * eye_separation * screen_width * (z_near / parallax_zero_depth);
-            left -= 0.5 * eye * eye_separation * screen_width * (z_near / parallax_zero_depth);
-            
+            //shear the frustum by adjusting l and r
+            l += (-eye * 0.5f * eye_separation * screen_width * n / (float)parallax_zero_depth);
+            r += (-eye * 0.5f * eye_separation * screen_width * n / (float)parallax_zero_depth);
+            fmat<float, 4, 4> P_frustum(4, 4, new float[16] {2 * n / (r - l), 0, (r + l) / (r - l), 0,
+                0, 2 * n / (t - b), (t + b) / (t - b), 0,
+                0, 0, (n + f) / (n - f), 2 * n * f / (n - f),
+                0, 0, -1, 0}, false);
 
-            cgv::mat4 P_frustum = cgv::mat4({
-                static_cast<float>(2 * z_near / (right - left)), 0, 0, 0, 
-                0, static_cast<float>(2 * z_near / (top - bottom)), 0, 0,
-                (right + left) / (right - left), (top + bottom) / (top - bottom), static_cast<float>((z_near + z_far) / (z_near - z_far)), -1,
-                0, 0, static_cast<float>(2 * z_near * z_far / (z_near - z_far)), 0
-            });
+            //row major
+            double* MV = ctx.get_modelview_matrix().data();
 
-            cgv::mat4 T = cgv::mat4({
-                1, 0, 0, 0, 
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                eye_offset, 0, 0, 1
-            });
+            //sign? - or +
+            fmat<float, 4, 4> T(4, 4, new float[16] {1.0f, 0.0f, 0.0f, (float)(MV[0])* (float)screen_width* eye * -0.5f * (float)eye_separation,
+                0.0f, 1.0f, 0.0f, (float)(MV[4])* (float)screen_width* eye * -0.5f * (float)eye_separation,
+                0.0f, 0.0f, 1.0f, (float)(MV[8])* (float)screen_width* eye * -0.5f * (float)eye_separation,
+                0.0f, 0.0f, 0.0f, 1.0f}, false);
 
-
-            cgv::mat4 S = cgv::mat4({
-                1, 0, 0, 0, 
-                0, 1, 0, 0,
-                -eye_offset / (float) parallax_zero_depth, 0, 1, 0,
-                0, 0, 0, 1
-            });
-
-            cgv::mat4 MV = ctx.get_modelview_matrix();
-
-            if(cyclopic_lighting) {
-                ctx.set_modelview_matrix(MV);
-                ctx.set_projection_matrix(T * S * P_frustum);
-            } else {
-                ctx.set_modelview_matrix(T * S * MV);
+            if (cyclopic_lighting) {
+                ctx.set_modelview_matrix(ctx.get_modelview_matrix());
+                ctx.set_projection_matrix(P_frustum * T);
+            }
+            else {
+                ctx.set_modelview_matrix(T * ctx.get_modelview_matrix());
                 ctx.set_projection_matrix(P_frustum);
             }
-
 
             // store per eye modelview projection matrix to hand over to finalization pass
             MVP[i] = ctx.get_projection_matrix() * ctx.get_modelview_matrix();
