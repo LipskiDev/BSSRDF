@@ -1,10 +1,10 @@
  
 cmake_minimum_required(VERSION 3.24)
-set(COURSE_NAME "SciVis")
+set(COURSE_NAME "Research Project")
 project(${COURSE_NAME} C CXX)
 
 # pre-set CGV Framework options
-option(CGV_BUILD_EXAMPLES "" off)
+option(CGV_BUILD_EXAMPLES "" on)
 option(CGV_BUILD_WITH_AUDIO "" off)
 option(CGV_STDCPP17 "" on)
 
@@ -22,13 +22,7 @@ endif()
 
 # Add exercises
 # - configure for common root
-set(SCIVIS_ROOT_DIR ${CMAKE_SOURCE_DIR})
-# - add exercises
-add_subdirectory("4-volume")
-add_subdirectory("3-terrain")
-add_subdirectory("2-particle")
-add_subdirectory("1-stereo")
-add_subdirectory("0-intro")
+set(RESEARCH_PROJECT_ROOT_DIR ${CMAKE_SOURCE_DIR})
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Visual Studio fluff
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT task0_framework)
+add_subdirectory("bssrdf")
