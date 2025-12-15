@@ -21,10 +21,10 @@ cgv_add_target(bssrdf
 
 	DEPENDENCIES
 		cgv_viewer glew fltk cgv_utils cgv_type cgv_reflect cgv_data cgv_signal cgv_base cgv_media cgv_gui
-		cgv_render cgv_os cgv_gl cg_fltk cmf_tt_gl_font crg_stereo_view cg_ext cg_meta cmi_io
+		cgv_render cgv_os cgv_gl cg_fltk cmf_tt_gl_font crg_stereo_view cg_ext cg_meta cmi_io crg_antialias
 
 	LINKTIME_PLUGIN_DEPENDENCIES
-		cmf_tt_gl_font
+		cmf_tt_gl_font crg_antialias
 
 	ADDITIONAL_CMDLINE_ARGS
 		"config:\"${CMAKE_CURRENT_LIST_DIR}/config.def\""
