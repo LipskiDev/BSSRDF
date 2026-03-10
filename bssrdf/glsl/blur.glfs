@@ -1,0 +1,34 @@
+#version 430
+
+out vec4 frag_color;
+
+in vec2 vUV;
+
+vec2 stretch = vec2(1.0, 1.0);
+
+uniform layout(binding = 0) sampler2D irrad;
+uniform vec2 u_texelSize;
+uniform vec2 u_dir;
+uniform float u_sigma;
+
+float gauss(float x, float sigma) {
+    return exp(-(x * x) /   (2.0 * sigma * sigma));
+}
+
+void main() {
+    int radius = int(ceil(3.0 * u_sigma));
+
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+
+    for(int i = -radius; i <= radius; ++i) {
+        float w = gauss(float(i), u_sigma);
+
+        vec2 uv = vUV+ u_dir * u_texelSize * float(i);
+        vec3 c = texture(irrad, uv).rgb;
+        sum += w * c;
+        wsum += w;
+    }
+
+    frag_color = vec4(sum / max(wsum, 1e-6), 1.0);
+}

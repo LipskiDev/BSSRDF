@@ -1,0 +1,28 @@
+// default.vert
+#version 330 core
+
+//***** begin interface of view.glsl ***********************************
+mat4 get_modelview_projection_matrix();
+mat4 get_modelview_matrix();
+mat4 get_inverse_modelview_matrix();
+mat4 get_projection_matrix();
+//***** end interface of view.glsl ***********************************
+
+uniform mat4 u_light_space_matrix;
+
+layout (location = 0) in vec3 aPos;   // position
+layout (location = 1) in vec3 aNormal;// normal
+layout (location = 2) in vec2 aUV;    // texcoord
+
+out vec2 vUV;
+out vec3 vNormal;
+out vec4 position_light_space;
+
+void main() {
+    vec4 viewPos = get_modelview_matrix() * vec4(aPos, 1.0);
+    vec4 worldPos = get_inverse_modelview_matrix() * viewPos;
+    vUV = aUV;
+    vNormal = aNormal;
+    position_light_space = u_light_space_matrix * worldPos;
+    gl_Position = get_projection_matrix() * viewPos;
+}

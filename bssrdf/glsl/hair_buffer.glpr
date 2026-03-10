@@ -1,0 +1,3 @@
+vertex_file:view.glsl
+vertex_file:hair_buffer.glvs
+fragment_file:hair_buffer.glfs

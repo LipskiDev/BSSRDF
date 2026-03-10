@@ -1,7 +1,7 @@
 #version 430
 
-layout (location = 0) out vec4 frag_color;
-layout (location = 1) out float reveal;
+layout(location=0) out vec4 outAccum;
+layout(location=1) out float outLogR;
 
 uniform layout(binding = 0) sampler2D u_IrradianceBasis0;
 uniform layout(binding = 1) sampler2D u_IrradianceBasis1;
@@ -32,8 +32,8 @@ uniform vec3 u_lightColor;
 uniform vec3 u_ambient;
 
 uniform float u_KK_wrap = 0.25;    
-uniform float u_KK_specExp = 100.0; 
-uniform float u_KK_specStrength = 0.8;
+uniform float u_KK_specExp = 60.0; 
+uniform float u_KK_specStrength = 0.3;
 uniform float u_KK_diffStrength = 0.25;
 
 
@@ -78,8 +78,11 @@ void main() {
 
     float alphaScatter = sqrt(clamp(alpha, 0.0, 1.0));
 
-    vec3 color = Sc + Sss * alphaScatter;
+    vec3 C = Sc + Sss * alphaScatter;
 
-    frag_color = vec4(color * alpha, alpha);
-    reveal = 0.5;
+    float w = alpha;
+
+    outAccum = vec4(C * alpha * w, w);
+    float oneMinusA = max(1.0 - alpha, 1e-4);
+    outLogR = log(oneMinusA);
 }

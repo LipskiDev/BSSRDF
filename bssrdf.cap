@@ -1,0 +1,28 @@
+{
+    "rdocCaptureSettings": 1,
+    "settings": {
+        "autoStart": false,
+        "commandLine": "plugin:cg_fltk \"type(shader_config):shader_path='C:/dev/BSSRDF/cgv/libs/cgv_gl/glsl;C:/dev/BSSRDF/bssrdf/glsl'\" plugin:cmf_tt_gl_font plugin:crg_antialias plugin:cg_ext plugin:cg_meta plugin:cmi_io plugin:crg_stereo_view plugin:bssrdf  config:\"C:/dev/BSSRDF/bssrdf/config.def\"",
+        "environment": [
+        ],
+        "executable": "C:\\dev\\BSSRDF\\cmake-build\\cgv\\bin\\Debug\\cgv_viewer.exe",
+        "inject": false,
+        "numQueuedFrames": 0,
+        "options": {
+            "allowFullscreen": true,
+            "allowVSync": true,
+            "apiValidation": false,
+            "captureAllCmdLists": false,
+            "captureCallstacks": false,
+            "captureCallstacksOnlyDraws": false,
+            "debugOutputMute": true,
+            "delayForDebugger": 0,
+            "hookIntoChildren": false,
+            "refAllResources": false,
+            "softMemoryLimit": 0,
+            "verifyBufferAccess": false
+        },
+        "queuedFrameCap": 0,
+        "workingDir": ""
+    }
+}

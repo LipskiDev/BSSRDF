@@ -1,0 +1,47 @@
+#version 430 
+
+in vec2 vUV;
+out vec4 outE;
+
+uniform vec3 u_lightDirWS = vec3(0.5, 0.5, 0.5); // normalized, from boundary towards the light
+uniform vec3 u_lightRadiance = vec3(1, 1, 1); // RGB radiance of directional light
+uniform vec3 u_boundaryNormalWS = vec3(0, 1, 0); // vec3(0, 1, 0)
+uniform vec3 u_ambientIrradiance = vec3(0.1); // small fill, can be vec3(0)
+
+uniform layout(binding = 0) sampler2DShadow shadowMap;
+uniform mat4 u_lightSpaceMatrix;
+
+uniform float u_shadowBias = 0.001;
+
+float shadow_factor(vec3 boundaryPosWS) {
+	vec4 pLS = u_lightSpaceMatrix * vec4(boundaryPosWS, 1.0);
+
+	vec3 ndc = pLS.xyz / pLS.w;
+
+	vec3 sc = ndc * 0.5 + 0.5;
+
+	if(sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0) {
+		return 1.0;
+	}
+	float ref = sc.z - u_shadowBias;
+	return texture(shadowMap, vec3(sc.xy, ref));
+}
+
+
+void main() 
+{
+	vec2 uv = vUV;
+	vec3 boundaryPosWS = vec3(uv.x - 0.5, 0.5, uv.y - 0.5);
+ 	vec3 N = normalize(u_boundaryNormalWS);
+	vec3 L = normalize(u_lightDirWS);
+
+	float sh = shadow_factor(boundaryPosWS);
+
+ 	float NdotL = max(dot(N, L), 0.0);
+
+	vec3 E = u_lightRadiance * NdotL * sh;
+
+	E += u_ambientIrradiance;
+
+	outE = vec4(E, 1.0);
+}
