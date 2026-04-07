@@ -1,0 +1,22 @@
+#version 430
+
+layout(location=0) out float outTau;
+
+in VS_OUT {
+    vec3 center;
+    vec3 tangent;
+    vec2 rootUV;
+    float vAlong;
+    vec3 viewDir;
+} fs_in;
+
+uniform float widthTip;
+uniform float widthRoot;
+
+void main()
+{
+    float alpha = 0.35 * pow(1.0 - fs_in.vAlong, 1.5);
+
+    float densityScale = 1.0;
+    outTau = alpha * densityScale;
+}

@@ -8,7 +8,7 @@ mat4 get_inverse_modelview_matrix();
 mat4 get_projection_matrix();
 //***** end interface of view.glsl ***********************************
 
-uniform mat4 u_light_space_matrix;
+uniform mat4 u_lightSpaceMatrix;
 
 layout (location = 0) in vec3 aPos;   // position
 layout (location = 1) in vec3 aNormal;// normal
@@ -23,6 +23,6 @@ void main() {
     vec4 worldPos = get_inverse_modelview_matrix() * viewPos;
     vUV = aUV;
     vNormal = aNormal;
-    position_light_space = u_light_space_matrix * worldPos;
+    position_light_space = u_lightSpaceMatrix * worldPos;
     gl_Position = get_projection_matrix() * viewPos;
 }

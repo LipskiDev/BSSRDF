@@ -91,7 +91,7 @@ protected:
 
 			shader.set_uniform(ctx, "u_model_matrix", transformation_matrix);
 			shader.set_uniform(ctx, "u_model_normal_matrix", rctx.get_normal_matrix(transformation_matrix));
-			shader.set_uniform(ctx, "u_light_space_matrix", rctx.light_matrix * transformation_matrix);
+			shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * transformation_matrix);
 			shader.set_uniform(ctx, "u_uv_scale", uv_scale);
 
 			ctx.set_modelview_matrix(rctx.view_matrix * transformation_matrix);
@@ -113,13 +113,11 @@ protected:
 			context& ctx = *rctx.ctx;
 
 
-			shader.set_uniform(ctx, "u_light_space_matrix", rctx.light_matrix * transformation_matrix);
+			shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * transformation_matrix);
 			
 			va.enable(ctx);
 			glDrawArrays(GL_TRIANGLES, 0, (GLsizei)verts.size());
 			va.disable(ctx);
-
-
 		}
 	};
 
@@ -142,6 +140,11 @@ protected:
 	frame_buffer hair_fb;
 	texture hair_accum;
 	texture hair_reveal;
+
+	// Deep Opacity Maps
+	frame_buffer dom_fb;
+	texture dom_tau;
+	shader_program dom_shader;
 
 	// Scene buffers
 	frame_buffer scene_fb;
@@ -194,7 +197,7 @@ protected:
 	float shadow_map_distance = 2.0f;
 	float shadow_map_resolution = 256 * 8;
 
-	float widthTip = 0.001, widthRoot = 0.000;
+	float widthTip = 0.0035, widthRoot = 0.012;
 
 	float sigma[5] = { 1.0, 2.0, 4.0, 8.0, 16.0 };
 
@@ -211,7 +214,7 @@ public:
 		floor.position = cgv::vec3(0.0, 0.0, 0.0);
 		floor.compute_transformation();
 
-		fur.rotation = cgv::vec3(0.0, 180.0, 0.0);
+		fur.rotation = cgv::vec3(0.0, 0.0, 0.0);
 		fur.position = cgv::vec3(0.0, 0.5, 0.0);
 		fur.compute_transformation();
 
@@ -229,6 +232,7 @@ public:
 
 		scene_texture = cgv::render::texture{ "flt16[R,G,B]" };
 		scene_depth = cgv::render::texture{ "flt16[D]" };
+		dom_tau = cgv::render::texture{ "flt16[R]" };
 	}
 
 	std::string get_type_name(void) const { return "bssrdf"; }
@@ -306,9 +310,14 @@ public:
 			exit(0);
 		}
 
-		init_strands_geometry_from_segment_obj("C:/dev/BSSRDF/bssrdf/res/fur.obj", fur.verts);
+		if (!dom_shader.build_program(ctx, "dom.glpr")) {
+			std::cerr << "could not build DOM shader program" << std::endl;
+			exit(0);
+		}
+
+		init_groomed_patch_geometry(fur.verts);
 		init_quad_geometry(floor.verts, 10.f);
-		init_sphere_geometry(sphere.verts);
+		init_sphere_geometry(sphere.verts, 0.05);
 		generate_jitter_texture(ctx);
 
 		cgv::render::type_descriptor
@@ -458,6 +467,13 @@ public:
 		external_occluders_depth_map.set_mag_filter(TF_LINEAR);
 		external_occluders_depth_map.set_border_color(1.0f, 1.0f, 1.0f, 1.0f);
 
+		dom_tau.create(ctx, TextureType::TT_2D, shadow_map_resolution, shadow_map_resolution);
+		dom_tau.set_wrap_s(TW_CLAMP_TO_BORDER);
+		dom_tau.set_wrap_t(TW_CLAMP_TO_BORDER);
+		dom_tau.set_min_filter(TF_NEAREST);
+		dom_tau.set_mag_filter(TF_NEAREST);
+		dom_tau.set_border_color(1.0f, 1.0f, 1.0f, 1.0f);
+
 		success &= fb.create(ctx, 512, 512);
 		success &= fb.attach(ctx, irradianceBasis[0], 0, 0);
 
@@ -475,6 +491,9 @@ public:
 
 		success &= external_occluders_shadow_map.create(ctx, shadow_map_resolution, shadow_map_resolution);
 		success &= external_occluders_shadow_map.attach(ctx, external_occluders_depth_map);
+
+		success &= dom_fb.create(ctx, shadow_map_resolution, shadow_map_resolution);
+		success &= dom_fb.attach(ctx, dom_tau, 0, 0);
 
 		success &= blur_fb.create(ctx, 512, 512);
 		
@@ -572,6 +591,8 @@ public:
 
 		shadow_mapping_shader.enable(ctx);
 		shadow_mapping_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
 
 		floor.draw_depth(rctx, shadow_mapping_shader);
 		sphere.draw_depth(rctx, shadow_mapping_shader);
@@ -586,6 +607,38 @@ public:
 
 		ctx.push_modelview_matrix();
 
+		// DOM pass
+		dom_shader.enable(ctx);
+		dom_fb.enable(ctx, 0);
+
+		ctx.push_window_transformation_array();
+		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
+
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+
+		glEnable(GL_BLEND);
+		glBlendEquation(GL_FUNC_ADD);
+		glBlendFunc(GL_ONE, GL_ONE);
+
+		const float zero_dom[4] = { 0, 0, 0, 0 };
+		glClearBufferfv(GL_COLOR, 0, zero_dom);
+
+		dom_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
+		dom_shader.set_uniform(ctx, "widthTip", widthTip);
+		dom_shader.set_uniform(ctx, "widthRoot", widthRoot);
+
+		fur.draw(rctx, dom_shader);
+
+		dom_fb.disable(ctx);
+		dom_shader.disable(ctx);
+
+		glDisable(GL_BLEND);
+		glDepthMask(GL_TRUE);
+
+		ctx.pop_window_transformation_array();
+
 		// render euv texture
 		euv_shader.enable(ctx);
 
@@ -594,6 +647,8 @@ public:
 		euv_shader.set_uniform(ctx, "u_boundaryNormalWS", cgv::vec3(0.0, 1.0, 0.0));
 		euv_shader.set_uniform(ctx, "u_ambientIrradiance", cgv::vec3(0.1));
 		euv_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
+		euv_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		euv_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
 		external_occluders_depth_map.enable(ctx, 0);
 
 		fb.enable(ctx, 0);
@@ -622,7 +677,9 @@ public:
 		textured_surface.set_uniform(ctx, "u_lightColor", light.color);
 		textured_surface.set_uniform(ctx, "u_ambient", cgv::vec3(0.2, 0.2, 0.2));
 		textured_surface.set_uniform(ctx, "u_lightdir", light.direction);
-		textured_surface.set_uniform(ctx, "u_light_space_matrix", rctx.light_matrix);
+		textured_surface.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
+		textured_surface.set_uniform(ctx, "u_widthTip", widthTip);
+		textured_surface.set_uniform(ctx, "u_widthRoot", widthRoot);
 
 		all_occluders_depth_map.enable(ctx, 0);
 		jitter_tex.enable(ctx, 1);
@@ -639,6 +696,8 @@ public:
 
 		hair_buffer_shader.enable(ctx);
 		hair_fb.enable(ctx, 0, 1);
+		glViewport(0, 0, ctx.get_width(), ctx.get_height());
+
 		// Clear MRTs explicitly
 		const float zero4[4] = { 0,0,0,0 };
 		glClearBufferfv(GL_COLOR, 0, zero4);
@@ -647,7 +706,9 @@ public:
 		glClearBufferfv(GL_COLOR, 1, zero1);
 
 		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
 		glDepthMask(GL_FALSE);
+		glDisable(GL_CULL_FACE);
 
 		glEnable(GL_BLEND);
 
@@ -667,7 +728,9 @@ public:
 		irradianceBasis[2].enable(ctx, 2);
 		irradianceBasis[3].enable(ctx, 3);
 		irradianceBasis[4].enable(ctx, 4);
+		dom_tau.enable(ctx, 6);
 
+		hair_buffer_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
 		hair_buffer_shader.set_uniform(ctx, "u_scatterStrength", 1.0f);
 		hair_buffer_shader.set_uniform(ctx, "u_w0", 0.35f);
 		hair_buffer_shader.set_uniform(ctx, "u_w1", 0.25f);
@@ -681,8 +744,9 @@ public:
 		hair_buffer_shader.set_uniform(ctx, "u_lightColor", light.color);
 		hair_buffer_shader.set_uniform(ctx, "u_ambient", cgv::vec3(0.2, 0.2, 0.2));
 
-
 		fur.draw(rctx, hair_buffer_shader);
+		dom_tau.disable(ctx);
+		//draw_fur_patch(rctx, hair_buffer_shader);
 		glEnable(GL_DEPTH_TEST);
 		hair_buffer_shader.disable(ctx);
 		hair_fb.disable(ctx);
@@ -691,12 +755,13 @@ public:
 		glDisable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-
 		hair_resolve_shader.enable(ctx);
 
 		hair_accum.enable(ctx, 0);
 		hair_reveal.enable(ctx, 1);
 		scene_texture.enable(ctx, 2);
+		hair_resolve_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		hair_resolve_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
 
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
@@ -817,24 +882,25 @@ public:
 
 	struct Segment { int a, b; };
 
-	void init_strands_geometry_from_segment_obj(const char* objPath, std::vector<strand_vertex>& verts) {
+	void init_strands_geometry_from_segment_obj(const char* objPath, std::vector<strand_vertex>& verts)
+	{
 		const uint32_t STRAND_POINTS = 3;
-
-		// Keep your earlier offset behavior if needed:
 		const cgv::vec3 POSITION_OFFSET = cgv::vec3(1.0f, 0.0f, 0.0f);
 
 		std::ifstream in(objPath);
-		if (!in.is_open()) return;
+		if (!in.is_open())
+			return;
 
 		std::vector<cgv::vec3> positions;
-		std::vector<Segment> segments;
-		positions.reserve(50000);
-		segments.reserve(40000);
+		std::vector<std::pair<int, int>> rawSegments;
 
-		// Parse OBJ (only v and l)
+		positions.reserve(50000);
+		rawSegments.reserve(40000);
+
 		std::string line;
 		while (std::getline(in, line)) {
-			if (line.empty() || line[0] == '#') continue;
+			if (line.empty() || line[0] == '#')
+				continue;
 
 			std::istringstream ss(line);
 			std::string tag;
@@ -846,38 +912,88 @@ public:
 				positions.push_back(cgv::vec3(x, y, z));
 			}
 			else if (tag == "l") {
-				// In your file it's always "l a b"
 				int ia = 0, ib = 0;
 				ss >> ia >> ib;
-
-				int a = resolve_obj_index_1based(ia, (int)positions.size());
-				int b = resolve_obj_index_1based(ib, (int)positions.size());
-
-				// Skip invalid references (your file has a few at the very end)
-				if (a < 0 || b < 0 || a >= (int)positions.size() || b >= (int)positions.size()) continue;
-
-				segments.push_back({ a, b });
+				if (!ss.fail()) {
+					rawSegments.emplace_back(ia, ib);
+				}
 			}
 		}
 
-		if (positions.empty() || segments.empty()) return;
+		if (positions.empty() || rawSegments.empty())
+			return;
 
-		// Build adjacency (degree is 1 or 2 for strands)
+		// Detect global positive index bias in the OBJ.
+		// Your file uses line indices [5 .. 45295] for 45291 vertices,
+		// so the bias is 4.
+		int minPositiveRef = std::numeric_limits<int>::max();
+		int maxPositiveRef = std::numeric_limits<int>::min();
+
+		for (const auto& s : rawSegments) {
+			if (s.first > 0) {
+				minPositiveRef = std::min(minPositiveRef, s.first);
+				maxPositiveRef = std::max(maxPositiveRef, s.first);
+			}
+			if (s.second > 0) {
+				minPositiveRef = std::min(minPositiveRef, s.second);
+				maxPositiveRef = std::max(maxPositiveRef, s.second);
+			}
+		}
+
+		int globalBias = 0;
+
+		// If the positive referenced range exactly matches the number of vertices,
+		// but does not start at 1, compensate.
+		if (minPositiveRef != std::numeric_limits<int>::max()) {
+			const int referencedSpan = maxPositiveRef - minPositiveRef + 1;
+			if (referencedSpan == (int)positions.size() && minPositiveRef != 1) {
+				globalBias = minPositiveRef - 1;
+			}
+		}
+
+		auto resolve_index = [&](int idx1Based) -> int {
+			// Handle negative OBJ indices normally
+			if (idx1Based < 0) {
+				int resolved = (int)positions.size() + idx1Based;
+				return resolved;
+			}
+
+			// Positive indices in this file are globally biased
+			int resolved = idx1Based - 1 - globalBias;
+			return resolved;
+			};
+
+		std::vector<Segment> segments;
+		segments.reserve(rawSegments.size());
+
+		for (const auto& rs : rawSegments) {
+			int a = resolve_index(rs.first);
+			int b = resolve_index(rs.second);
+
+			if (a < 0 || b < 0 || a >= (int)positions.size() || b >= (int)positions.size())
+				continue;
+
+			segments.push_back({ a, b });
+		}
+
+		if (segments.empty())
+			return;
+
 		std::vector<std::vector<int>> adj(positions.size());
-		adj.reserve(positions.size());
 		for (const Segment& s : segments) {
 			adj[s.a].push_back(s.b);
 			adj[s.b].push_back(s.a);
 		}
 
-		// Collect strand polylines by walking from degree-1 endpoints
 		std::vector<uint8_t> visited(positions.size(), 0);
 		std::vector<std::vector<int>> strands;
 		strands.reserve(20000);
 
 		for (int v = 0; v < (int)positions.size(); ++v) {
-			if ((int)adj[v].size() != 1) continue;      // endpoint
-			if (visited[v]) continue;
+			if ((int)adj[v].size() != 1)
+				continue;
+			if (visited[v])
+				continue;
 
 			std::vector<int> path;
 			path.reserve(8);
@@ -889,17 +1005,20 @@ public:
 				visited[cur] = 1;
 				path.push_back(cur);
 
-				// pick next neighbor not equal prev
 				int next = -1;
 				for (int nb : adj[cur]) {
-					if (nb != prev) { next = nb; break; }
+					if (nb != prev) {
+						next = nb;
+						break;
+					}
 				}
-				if (next < 0) break;
+
+				if (next < 0)
+					break;
 
 				prev = cur;
 				cur = next;
 
-				// stop at other endpoint
 				if ((int)adj[cur].size() == 1) {
 					visited[cur] = 1;
 					path.push_back(cur);
@@ -907,13 +1026,13 @@ public:
 				}
 			}
 
-			if (path.size() >= 2) strands.push_back(std::move(path));
+			if (path.size() >= 2)
+				strands.push_back(std::move(path));
 		}
 
-		if (strands.empty()) return;
+		if (strands.empty())
+			return;
 
-		// Compute a bbox on root positions for a simple rootUV fallback (no vt in the OBJ)
-		// Root is chosen as the endpoint with smaller y.
 		cgv::vec3 bbMin(1e30f, 1e30f, 1e30f);
 		cgv::vec3 bbMax(-1e30f, -1e30f, -1e30f);
 
@@ -926,29 +1045,39 @@ public:
 		for (const auto& path : strands) {
 			int r = endpoint_root_index(path);
 			const cgv::vec3& rp = positions[r];
-			bbMin = cgv::vec3(std::min(bbMin.x(), rp.x()), std::min(bbMin.y(), rp.y()), std::min(bbMin.z(), rp.z()));
-			bbMax = cgv::vec3(std::max(bbMax.x(), rp.x()), std::max(bbMax.y(), rp.y()), std::max(bbMax.z(), rp.z()));
+			bbMin = cgv::vec3(
+				std::min(bbMin.x(), rp.x()),
+				std::min(bbMin.y(), rp.y()),
+				std::min(bbMin.z(), rp.z())
+			);
+			bbMax = cgv::vec3(
+				std::max(bbMax.x(), rp.x()),
+				std::max(bbMax.y(), rp.y()),
+				std::max(bbMax.z(), rp.z())
+			);
 		}
 
 		cgv::vec3 bbSpan = bbMax - bbMin;
 		if (std::abs(bbSpan.x()) < 1e-8f) bbSpan.x() = 1.0f;
 		if (std::abs(bbSpan.z()) < 1e-8f) bbSpan.z() = 1.0f;
 
-		// Output
 		verts.clear();
 		verts.reserve(strands.size() * STRAND_POINTS * 2);
 
 		auto sample_polyline_arc = [&](const std::vector<int>& path, float u01) -> cgv::vec3 {
-			// Uniform sampling by arc length along the polyline
-			if (path.size() == 1) return positions[path[0]];
+			if (path.size() == 1)
+				return positions[path[0]];
 
 			float total = 0.0f;
 			std::vector<float> cum(path.size(), 0.0f);
+
 			for (size_t i = 1; i < path.size(); ++i) {
 				total += cgv::math::length(positions[path[i]] - positions[path[i - 1]]);
 				cum[i] = total;
 			}
-			if (total < 1e-8f) return positions[path.front()];
+
+			if (total < 1e-8f)
+				return positions[path.front()];
 
 			float target = u01 * total;
 			auto it = std::lower_bound(cum.begin(), cum.end(), target);
@@ -964,34 +1093,34 @@ public:
 			};
 
 		for (auto path : strands) {
-			// Ensure order is root -> tip (root = endpoint with smaller y)
 			const cgv::vec3& p0 = positions[path.front()];
 			const cgv::vec3& p1 = positions[path.back()];
-			if (p0.y() > p1.y()) std::reverse(path.begin(), path.end());
 
-			// Root UV fallback (XZ mapped into [0,1] using root bbox)
+			if (p0.y() > p1.y())
+				std::reverse(path.begin(), path.end());
+
 			cgv::vec3 rootPos3 = positions[path.front()];
 			cgv::vec2 rootUV(
 				(rootPos3.x() - bbMin.x()) / bbSpan.x(),
 				(rootPos3.z() - bbMin.z()) / bbSpan.z()
 			);
 
-			// Sample centerline points
 			cgv::vec3 samples[STRAND_POINTS];
 			for (uint32_t i = 0; i < STRAND_POINTS; ++i) {
 				float u = (STRAND_POINTS == 1) ? 0.0f : float(i) / float(STRAND_POINTS - 1);
 				samples[i] = sample_polyline_arc(path, u);
 			}
 
-			// Emit ribbon vertices
 			for (uint32_t i = 0; i < STRAND_POINTS; ++i) {
 				float V = (STRAND_POINTS == 1) ? 0.0f : float(i) / float(STRAND_POINTS - 1);
 
-				// Tangent via finite differences on sampled points
 				cgv::vec3 tan;
-				if (i == 0) tan = safe_normalize(samples[1] - samples[0]);
-				else if (i + 1 == STRAND_POINTS) tan = safe_normalize(samples[i] - samples[i - 1]);
-				else tan = safe_normalize(samples[i + 1] - samples[i - 1]);
+				if (i == 0)
+					tan = safe_normalize(samples[1] - samples[0]);
+				else if (i + 1 == STRAND_POINTS)
+					tan = safe_normalize(samples[i] - samples[i - 1]);
+				else
+					tan = safe_normalize(samples[i + 1] - samples[i - 1]);
 
 				cgv::vec3 center = samples[i] - POSITION_OFFSET;
 
@@ -1007,6 +1136,135 @@ public:
 
 				verts.push_back(vL);
 				verts.push_back(vR);
+			}
+		}
+	}
+
+	void init_groomed_patch_geometry(std::vector<strand_vertex>& verts) {
+		const uint32_t STRAND_AMOUNT = 50000;
+		const uint32_t STRAND_POINTS = 12; // points along centerline
+
+		const float PATCH_WIDTH = 1.6f;
+		const float PATCH_DEPTH = 1.6f;
+
+		const float LENGTH_MIN = 0.35f;
+		const float LENGTH_MAX = 0.75f;
+
+		const cgv::vec3 BASE_DIR =
+			cgv::math::normalize(cgv::vec3(1.0f, 0.25f, 0.15f));
+
+		// Each strand with N points has (N-1) ribbon segments.
+		// Each segment becomes 2 triangles = 6 vertices.
+		verts.clear();
+		verts.reserve(STRAND_AMOUNT * (STRAND_POINTS - 1) * 6);
+
+		std::mt19937 rng(1337);
+		std::uniform_real_distribution<float> dist01(0.0f, 1.0f);
+		std::uniform_real_distribution<float> jitter(-1.0f, 1.0f);
+
+		auto rotate_y = [](const cgv::vec3& v, float a) {
+			float c = std::cos(a);
+			float s = std::sin(a);
+			return cgv::vec3(
+				c * v.x() + s * v.z(),
+				v.y(),
+				-s * v.x() + c * v.z()
+			);
+			};
+
+		auto rotate_z = [](const cgv::vec3& v, float a) {
+			float c = std::cos(a);
+			float s = std::sin(a);
+			return cgv::vec3(
+				c * v.x() - s * v.y(),
+				s * v.x() + c * v.y(),
+				v.z()
+			);
+			};
+
+		auto smoothstep01 = [](float x) {
+			x = std::clamp(x, 0.0f, 1.0f);
+			return x * x * (3.0f - 2.0f * x);
+			};
+
+		for (uint32_t s = 0; s < STRAND_AMOUNT; ++s) {
+			cgv::vec2 rootUV(dist01(rng), dist01(rng));
+
+			// Root on rectangular patch centered at origin
+			float px = (rootUV.x() - 0.5f) * PATCH_WIDTH;
+			float pz = (rootUV.y() - 0.5f) * PATCH_DEPTH;
+			cgv::vec3 rootPos(px, 0.0f, pz);
+
+			// Longer in the middle, shorter near edges
+			float dx = std::abs(rootUV.x() - 0.5f) * 2.0f;
+			float dz = std::abs(rootUV.y() - 0.5f) * 2.0f;
+			float edge = std::max(dx, dz);
+			float centerFactor = 1.0f - smoothstep01(edge);
+
+			float strandLength =
+				cgv::math::lerp(LENGTH_MIN, LENGTH_MAX, centerFactor);
+
+			float yawJitter = 0.35f * jitter(rng);
+			float pitchJitter = 0.20f * jitter(rng);
+
+			cgv::vec3 dir = BASE_DIR;
+			dir = rotate_y(dir, yawJitter);
+			dir = rotate_z(dir, pitchJitter);
+			dir = cgv::math::normalize(dir);
+
+			cgv::vec3 flowDir =
+				cgv::math::normalize(cgv::vec3(1.0f, 0.05f, 0.0f));
+
+			// Build the strip samples first
+			std::vector<strand_vertex> strip;
+			strip.reserve(STRAND_POINTS * 2);
+
+			for (uint32_t i = 0; i < STRAND_POINTS; ++i) {
+				float t = float(i) / float(STRAND_POINTS - 1);
+
+				float bendAmount = t * t;
+
+				cgv::vec3 tangent =
+					cgv::math::normalize((1.0f - bendAmount) * dir +
+						bendAmount * flowDir);
+
+				float lift = 0.20f * std::sin(t * 1.2f);
+
+				cgv::vec3 p = rootPos
+					+ dir * (strandLength * t * 0.65f)
+					+ flowDir * (strandLength * t * t * 0.55f)
+					+ cgv::vec3(0.0f, lift * strandLength, 0.0f);
+
+				strand_vertex vL{};
+				vL.center = p;
+				vL.tan = tangent;
+				vL.rootUV = rootUV;
+				vL.VAlong = t;
+				vL.side = -1.0f;
+
+				strand_vertex vR = vL;
+				vR.side = 1.0f;
+
+				strip.push_back(vL);
+				strip.push_back(vR);
+			}
+
+			// Convert strip layout into explicit triangle list
+			for (uint32_t i = 0; i < STRAND_POINTS - 1; ++i) {
+				const strand_vertex& L0 = strip[2 * i + 0];
+				const strand_vertex& R0 = strip[2 * i + 1];
+				const strand_vertex& L1 = strip[2 * (i + 1) + 0];
+				const strand_vertex& R1 = strip[2 * (i + 1) + 1];
+
+				// Triangle 1
+				verts.push_back(L0);
+				verts.push_back(R0);
+				verts.push_back(L1);
+
+				// Triangle 2
+				verts.push_back(R0);
+				verts.push_back(R1);
+				verts.push_back(L1);
 			}
 		}
 	}
@@ -1071,6 +1329,38 @@ public:
 				verts.push_back({ radius * p11 });
 			}
 		}
+	}
+
+	void draw_fur_patch(render_context& rctx, shader_program& shader) {
+		context& ctx = *rctx.ctx;
+
+		shader.enable(ctx);
+
+		shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
+		shader.set_uniform(ctx, "u_model_normal_matrix",
+			rctx.get_normal_matrix(fur.transformation_matrix));
+		shader.set_uniform(ctx, "u_lightSpaceMatrix",
+			rctx.light_matrix * fur.transformation_matrix);
+
+		ctx.set_modelview_matrix(rctx.view_matrix * fur.transformation_matrix);
+		ctx.push_modelview_matrix();
+
+		fur.albedo_tex.enable(ctx, 5);
+		fur.va.enable(ctx);
+
+		const uint32_t verts_per_strand = 12 * 2; // STRAND_POINTS * 2
+		const uint32_t strand_count = static_cast<uint32_t>(fur.verts.size()) / verts_per_strand;
+
+		for (uint32_t s = 0; s < strand_count; ++s) {
+			uint32_t first = s * verts_per_strand;
+			glDrawArrays(GL_TRIANGLE_STRIP, first, verts_per_strand);
+		}
+
+		fur.va.disable(ctx);
+		fur.albedo_tex.disable(ctx);
+
+		ctx.pop_modelview_matrix();
+		shader.disable(ctx);
 	}
 };
 

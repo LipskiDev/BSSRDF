@@ -20,6 +20,7 @@ void main()
     float a  = 1.0 - Tv;
 
     // Representative hair color
+    float weightSum = max(accum.a, 1e-4);
     vec3 Ch = (accum.a > 1e-6) ? (accum.rgb / accum.a) : vec3(0.0);
 
     // Optical depth derived from Tv (robust)

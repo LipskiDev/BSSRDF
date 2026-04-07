@@ -14,6 +14,7 @@ uniform float u_w1;
 uniform float u_w2;
 uniform float u_w3;
 uniform float u_w4;
+uniform mat4 u_lightSpaceMatrix;
 
 uniform float u_scatterStrength;
 
@@ -26,6 +27,7 @@ in VS_OUT {
 } fs_in;
 
 uniform layout(binding = 5) sampler2D fur_color;
+uniform layout(binding = 6) sampler2D u_domTau;
 
 uniform vec3 u_lightdir;   
 uniform vec3 u_lightColor;
@@ -42,6 +44,22 @@ void main() {
     vec3 V = normalize(fs_in.viewDir);
     vec3 L = normalize(u_lightdir);
 
+    vec4 lp = u_lightSpaceMatrix * vec4(fs_in.center, 1.0);
+    vec3 ndc = lp.xyz / lp.w;
+
+    // map to [0,1]
+    vec2 luv = ndc.xy * 0.5 + 0.5;
+
+    if (luv.x < 0.0 || luv.x > 1.0 ||
+    luv.y < 0.0 || luv.y > 1.0)
+    {
+        // outside light frustum → no attenuation
+        luv = clamp(luv, 0.0, 1.0);
+    }
+
+    float tau_l = texture(u_domTau, luv).r;
+    float Tl = exp(-clamp(tau_l, 0.0, 20.0));
+
     float TL = abs(dot(T, L));
     float TV = abs(dot(T, V));
     
@@ -57,9 +75,10 @@ void main() {
 
     vec3 baseColor = texture(fur_color, fs_in.rootUV).rgb;
 
-    float alpha = smoothstep(1.0, 0.2, fs_in.vAlong);
-
-    vec3 Sc = baseColor * (u_ambient + (diffKK * u_KK_diffStrength) * u_lightColor) + specKK * u_lightColor;
+    vec3 Sc =
+        baseColor * u_ambient +
+        baseColor * (diffKK * u_KK_diffStrength) * u_lightColor * Tl +
+        specKK * u_lightColor * Tl;
 
     vec3 B0 = texture(u_IrradianceBasis0, fs_in.rootUV).rgb;
     vec3 B1 = texture(u_IrradianceBasis1, fs_in.rootUV).rgb;
@@ -67,22 +86,36 @@ void main() {
     vec3 B3 = texture(u_IrradianceBasis3, fs_in.rootUV).rgb;
     vec3 B4 = texture(u_IrradianceBasis4, fs_in.rootUV).rgb;
 
-    vec3 Sss = (u_w0 * B0 +
-                u_w1 * B1 +
-                u_w2 * B2 +
-                u_w3 * B3 +
-                u_w4 * B4);
+    vec3 Sss =
+        (u_w0 * B0 +
+         u_w1 * B1 +
+         u_w2 * B2 +
+         u_w3 * B3 +
+         u_w4 * B4);
 
     Sss *= baseColor;
     Sss *= u_scatterStrength;
+
+    // DOM drives scattering
+    Sss *= (1.0 - Tl);
+
+    float alpha = 0.35 * pow(1.0 - fs_in.vAlong, 1.5);
 
     float alphaScatter = sqrt(clamp(alpha, 0.0, 1.0));
 
     vec3 C = Sc + Sss * alphaScatter;
 
-    float w = alpha;
+    float viewWeight = pow(sinTV, 1.5);
+    float wColor = alpha * viewWeight;
 
-    outAccum = vec4(C * alpha * w, w);
-    float oneMinusA = max(1.0 - alpha, 1e-4);
+    float depth = gl_FragCoord.z;
+
+    float w = alpha;   
+    
+    outAccum = vec4(C * wColor, wColor);
+
+    float alphaReveal = alpha * 0.15;
+
+    float oneMinusA = max(1.0 - alphaReveal, 1e-4);
     outLogR = log(oneMinusA);
 }
