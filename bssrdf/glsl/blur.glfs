@@ -6,7 +6,7 @@ in vec2 vUV;
 
 vec2 stretch = vec2(1.0, 1.0);
 
-uniform layout(binding = 0) sampler2D irrad;
+uniform sampler2D irrad;
 uniform vec2 u_texelSize;
 uniform vec2 u_dir;
 uniform float u_sigma;

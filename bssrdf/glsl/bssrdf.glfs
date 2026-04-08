@@ -3,11 +3,13 @@
 layout (location = 0) out vec4 frag_color;
 layout (location = 1) out float reveal;
 
-uniform layout(binding = 0) sampler2D u_IrradianceBasis0;
-uniform layout(binding = 1) sampler2D u_IrradianceBasis1;
-uniform layout(binding = 2) sampler2D u_IrradianceBasis2;
-uniform layout(binding = 3) sampler2D u_IrradianceBasis3;
-uniform layout(binding = 4) sampler2D u_IrradianceBasis4;
+uniform sampler2D u_IrradianceBasis0;
+uniform sampler2D u_IrradianceBasis1;
+uniform sampler2D u_IrradianceBasis2;
+uniform sampler2D u_IrradianceBasis3;
+uniform sampler2D u_IrradianceBasis4;
+uniform sampler2D fur_color;
+
 
 uniform float u_w0;
 uniform float u_w1;
@@ -25,7 +27,6 @@ in VS_OUT {
     vec3 viewDir;   
 } fs_in;
 
-uniform layout(binding = 5) sampler2D fur_color;
 
 uniform vec3 u_lightdir;   
 uniform vec3 u_lightColor;

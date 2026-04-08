@@ -1,47 +1,40 @@
-#version 330
+#version 330 core
 
-//***** begin interface of view.glsl ***********************************
-mat4 get_modelview_projection_matrix();
-mat4 get_modelview_matrix();
-//***** end interface of view.glsl ***********************************
+layout(location = 0) in vec3 a_center;
+layout(location = 1) in vec3 a_tan;
+layout(location = 2) in vec2 a_rootUV;
+layout(location = 3) in float a_vAlong;
+layout(location = 4) in float a_side;
 
-layout(location = 0) in vec3 in_center;
-layout(location = 1) in vec3 in_tan;
-layout(location = 2) in vec2 in_rootUV;
-layout(location = 3) in float in_vAlong;
-layout(location = 4) in float in_side;
+uniform mat4 u_model_matrix;
+uniform mat4 u_lightSpaceMatrix;
 
-uniform float u_widthRoot = 0.0040;
-uniform float u_widthTip = 0.0015;
+uniform float widthTip;
+uniform float widthRoot;
+uniform vec3 u_lightDirWS;
 
 out VS_OUT {
-	vec3 center;
-	vec3 tangent;
-	vec2 rootUV;
-	float vAlong;
-	vec3 viewDir;
+    float vAlong;
+    float side;
 } vs_out;
 
 void main()
 {
-	mat4 invView = inverse(get_modelview_matrix());
+    // correct taper (same as shadow pass!)
+    float taper = pow(a_vAlong, 0.7);
+    float width = mix(widthRoot, widthTip, taper);
 
-	vec3 cameraPos = vec3(invView[3]);
+    vec3 T = normalize(a_tan);
 
-	vec3 T = normalize(in_tan);
-	vec3 V = normalize(cameraPos - in_center);
-	vec3 sideVec = normalize(cross(V, T));
+    // billboard using LIGHT direction (not camera!)
+    vec3 L = normalize(-u_lightDirWS);
+    vec3 N = normalize(cross(T, L));
 
-	float taper = in_vAlong * in_vAlong;
-	float width = mix(u_widthTip, u_widthRoot, taper);
-	vec3 pos = in_center + sideVec * in_side * width;
+    vec3 pos = a_center + N * (a_side * width * 0.5);
 
-	// transform vertex to clip space
-	gl_Position = get_modelview_projection_matrix() * vec4(pos, 1.0);
+    vec4 world = u_model_matrix * vec4(pos, 1.0);
 
-	vs_out.center = in_center;
-	vs_out.tangent = T;
-	vs_out.rootUV = in_rootUV;
-	vs_out.vAlong = in_vAlong;
-	vs_out.viewDir = V;
+    vs_out.vAlong = a_vAlong;
+    vs_out.side = a_side;
+    gl_Position = u_lightSpaceMatrix * vec4(pos, 1.0);
 }

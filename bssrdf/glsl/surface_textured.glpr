@@ -1,2 +1,3 @@
 vertex_file:view.glsl
-files:surface_textured
+vertex_file:surface_textured.glvs
+fragment_file:surface_textured.glfs

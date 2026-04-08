@@ -7,17 +7,18 @@
 #define INV_SAMPLES_COUNT (1.0 / SAMPLES_COUNT)
 
 in vec2 vUV;
-in vec4 position_light_space;
-in vec3 vNormal;
+in vec4 vPosLightSpace;
+in vec3 vNormalWS;
 
 uniform vec3 u_lightdir;
 uniform float shadow_blur = 0.5f;
 
 uniform float shadow_bias = 0.005;
 
-uniform layout(binding = 0) sampler2DShadow shadowMap;
-uniform layout(binding = 1) sampler3D jitter_tex;
-uniform layout(binding = 5) sampler2D uTex;
+uniform sampler2DShadow shadowMap;
+uniform sampler3D jitter_tex;
+uniform sampler2D uTex;
+
 
 float compute_shadow_factor(vec4 p_light_space, vec3 normal)
 {
@@ -77,8 +78,8 @@ float compute_shadow_factor(vec4 p_light_space, vec3 normal)
 out vec4 FragColor;
 
 void main() {
-    vec3 N = normalize(vNormal);
-    float shadow = compute_shadow_factor(position_light_space, N);
+    vec3 N = normalize(vNormalWS);
+    float shadow = compute_shadow_factor(vPosLightSpace, N);
     float NdotL = max(dot(N, u_lightdir), 0.0);
     float visibility = 1.0 - 0.5 * (1.0 - shadow * NdotL);
     vec3 color = texture(uTex, vUV / 4.0).rgb;

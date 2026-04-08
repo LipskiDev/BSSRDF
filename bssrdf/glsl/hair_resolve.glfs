@@ -3,9 +3,9 @@
 in vec2 vUV;
 layout(location=0) out vec4 outColor;
 
-layout(binding = 0) uniform sampler2D u_AccumTex;
-layout(binding = 1) uniform sampler2D u_logRTex;
-layout(binding = 2) uniform sampler2D u_sceneColor;
+uniform sampler2D u_AccumTex;
+uniform sampler2D u_logRTex;
+uniform sampler2D u_sceneColor;
 
 void main()
 {
@@ -35,7 +35,7 @@ void main()
 
     vec3 Ms = Ch * msStrength * (1.0 - Tl) * densityFactor;
 
-    vec3 hairFinal = Ch + Ms;
+    vec3 hairFinal = Ch;
 
     // Composite over scene (scene weighted by Tv)
     outColor = vec4(hairFinal * a + sceneColor * Tv, 1.0);

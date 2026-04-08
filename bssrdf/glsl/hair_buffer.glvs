@@ -1,9 +1,7 @@
 #version 330
 
-//***** begin interface of view.glsl ***********************************
 mat4 get_modelview_projection_matrix();
 mat4 get_modelview_matrix();
-//***** end interface of view.glsl ***********************************
 
 layout(location = 0) in vec3 in_center;
 layout(location = 1) in vec3 in_tan;
@@ -15,33 +13,32 @@ uniform float u_widthRoot = 0.0040;
 uniform float u_widthTip = 0.0015;
 
 out VS_OUT {
-	vec3 center;
-	vec3 tangent;
-	vec2 rootUV;
-	float vAlong;
-	vec3 viewDir;
+    vec3 posOS;
+    vec3 T;
+    vec3 V;
+    float vAlong;
+    vec2 rootUV;
 } vs_out;
 
 void main()
 {
-	mat4 invView = inverse(get_modelview_matrix());
+    mat4 invMV = inverse(get_modelview_matrix());
+    vec3 cameraPosOS = vec3(invMV[3]);
 
-	vec3 cameraPos = vec3(invView[3]);
+    vec3 T = normalize(in_tan);
+    vec3 V = normalize(cameraPosOS - in_center);
 
-	vec3 T = normalize(in_tan);
-	vec3 V = normalize(cameraPos - in_center);
-	vec3 sideVec = normalize(cross(V, T));
+    float taper = pow(in_vAlong, 0.7);
+    float width = mix(u_widthRoot, u_widthTip, taper);
 
-	float taper = in_vAlong * in_vAlong;
-	float width = mix(u_widthTip, u_widthRoot, taper);
-	vec3 pos = in_center + sideVec * in_side * width;
+    vec3 N = normalize(cross(T, V));
+    vec3 pos = in_center + N * (in_side * width * 0.5);
 
-	// transform vertex to clip space
-	gl_Position = get_modelview_projection_matrix() * vec4(pos, 1.0);
+    vs_out.posOS = pos;
+    vs_out.T = T;
+    vs_out.V = normalize(cameraPosOS - pos);
+    vs_out.vAlong = in_vAlong;
+    vs_out.rootUV = in_rootUV;
 
-	vs_out.center = in_center;
-	vs_out.tangent = T;
-	vs_out.rootUV = in_rootUV;
-	vs_out.vAlong = in_vAlong;
-	vs_out.viewDir = V;
+    gl_Position = get_modelview_projection_matrix() * vec4(pos, 1.0);
 }
