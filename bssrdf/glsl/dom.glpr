@@ -1,3 +1,4 @@
 vertex_file:view.glsl
 vertex_file:dom.glvs
+geometry_file:dom.glgs
 fragment_file:dom.glfs

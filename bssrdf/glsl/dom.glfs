@@ -1,16 +1,20 @@
-layout(location=0) out float outTau;
+#version 330 core
 
-in VS_OUT {
+layout(location = 0) out float outTau;
+
+in GS_OUT {
     float vAlong;
     float side;
 } fs_in;
 
 void main()
 {
-    float along = mix(0.45, 1.0, 1.0 - fs_in.vAlong);
-    float cross = pow(max(0.0, 1.0 - abs(fs_in.side)), 0.8);
-    
-    float alphaDom = 0.08 * along * cross;
+    float vAlong = clamp(fs_in.vAlong, 0.0, 1.0);
+    float side   = clamp(fs_in.side, -1.0, 1.0);
 
-    outTau = alphaDom;
+    float along = mix(0.45, 1.0, 1.0 - vAlong);
+    float cross = pow(max(0.0, 1.0 - abs(side)), 0.8);
+
+    float tau = 0.08 * along * cross;
+    outTau = tau;
 }

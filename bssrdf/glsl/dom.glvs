@@ -6,9 +6,7 @@ layout(location = 2) in vec2 a_rootUV;
 layout(location = 3) in float a_vAlong;
 layout(location = 4) in float a_side;
 
-uniform mat4 u_model_matrix;
 uniform mat4 u_lightSpaceMatrix;
-
 uniform float widthTip;
 uniform float widthRoot;
 uniform vec3 u_lightDirWS;
@@ -16,25 +14,32 @@ uniform vec3 u_lightDirWS;
 out VS_OUT {
     float vAlong;
     float side;
+    float lightDepth01;
 } vs_out;
 
 void main()
 {
-    // correct taper (same as shadow pass!)
     float taper = pow(a_vAlong, 0.7);
     float width = mix(widthRoot, widthTip, taper);
 
     vec3 T = normalize(a_tan);
-
-    // billboard using LIGHT direction (not camera!)
     vec3 L = normalize(-u_lightDirWS);
-    vec3 N = normalize(cross(T, L));
+
+    vec3 N = cross(T, L);
+    float nLen = length(N);
+    if (nLen < 1e-6)
+        N = vec3(1.0, 0.0, 0.0);
+    else
+        N /= nLen;
 
     vec3 pos = a_center + N * (a_side * width * 0.5);
 
-    vec4 world = u_model_matrix * vec4(pos, 1.0);
+    vec4 lightPos = u_lightSpaceMatrix * vec4(pos, 1.0);
+    gl_Position = lightPos;
+
+    float ndcZ = lightPos.z / lightPos.w;
+    vs_out.lightDepth01 = clamp(ndcZ * 0.5 + 0.5, 0.0, 1.0);
 
     vs_out.vAlong = a_vAlong;
     vs_out.side = a_side;
-    gl_Position = u_lightSpaceMatrix * vec4(pos, 1.0);
 }

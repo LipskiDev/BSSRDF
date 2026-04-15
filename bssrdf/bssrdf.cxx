@@ -24,6 +24,7 @@
 
 #define FB_MAX_RESOLUTION 2048
 #define BLUR_PASSES 5
+#define DOM_LAYER_COUNT 16
 
 using namespace cgv::render;
 
@@ -154,7 +155,7 @@ protected:
 
 	texture hair_accum;
 	texture hair_reveal;
-	texture dom_tau;
+	texture dom_tau_array;
 	texture scene_texture;
 	texture scene_depth;
 
@@ -179,6 +180,60 @@ protected:
 	float widthRoot = 0.012f;
 
 	float sigma[5] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+
+	// Hair shading debug / tuning
+	float scatterStrength = 1.0f;
+
+	float basis_w0 = 0.35f;
+	float basis_w1 = 0.25f;
+	float basis_w2 = 0.18f;
+	float basis_w3 = 0.14f;
+	float basis_w4 = 0.08f;
+
+	float r_lobe_exp = 80.0f;
+	float r_grazing_strength = 1.8f;
+	float r_shell_mix = 0.02f;
+
+	float tt_lobe_exp = 1.5f;
+	float tt_transmission_min = 0.1f;
+
+	float trt_shift = 0.2f;
+	float trt_lobe_exp = 20.0f;
+	float trt_strength = 0.35f;
+	float trt_interior_exp = 1.8f;
+
+	float sss_mask_exp = 1.8f;
+	float sss_strength = 0.18f;
+
+	float shell_strength = 0.15f;
+	float shell_exp = 1.5f;
+
+	float rim_strength = 0.12f;
+	float rim_exp = 2.0f;
+
+	float alpha_root = 0.40f;
+	float alpha_tip = 0.18f;
+
+	float tau_scale = 0.5f;
+	float tau_noise_min = 0.7f;
+	float tau_noise_max = 1.3f;
+
+	float tangent_noise_scale = 10.0f;
+	float tangent_noise_angle = 0.25f;
+	float tau_noise_scale = 4.0f;
+
+	int dom_layer_count = DOM_LAYER_COUNT;
+	float dom_near = 0.1f;
+	float dom_far = 10.0f;
+
+	bool debug_show_r = false;
+	bool debug_show_tt = false;
+	bool debug_show_trt = false;
+	bool debug_show_sss = false;
+	bool debug_show_shell = false;
+	bool debug_show_rim = false;
+	bool debug_show_tau = false;
+	bool debug_show_alpha = false;
 
 public:
 	bssrdf()
@@ -205,7 +260,7 @@ public:
 		hair_reveal = cgv::render::texture{ "flt16[R]" };
 		scene_texture = cgv::render::texture{ "flt16[R,G,B]" };
 		scene_depth = cgv::render::texture{ "flt16[D]" };
-		dom_tau = cgv::render::texture{ "flt16[R]" };
+		dom_tau_array = cgv::render::texture{ "flt16[R]" };
 	}
 
 	std::string get_type_name(void) const { return "bssrdf"; }
@@ -232,6 +287,62 @@ public:
 
 		add_decorator("Fur Geometry", "heading", "level=3");
 		add_member_control(this, "Fur Tip Width", widthTip, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
+		add_member_control(this, "Fur Root Width", widthRoot, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
+
+		add_decorator("Hair Scattering", "heading", "level=3");
+		add_member_control(this, "Scatter Strength", scatterStrength, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
+		add_member_control(this, "SSS Strength", sss_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "SSS Mask Exp", sss_mask_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
+
+		add_decorator("Basis Weights", "heading", "level=3");
+		add_member_control(this, "w0", basis_w0, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "w1", basis_w1, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "w2", basis_w2, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "w3", basis_w3, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "w4", basis_w4, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+
+		add_decorator("R Lobe", "heading", "level=3");
+		add_member_control(this, "R Exp", r_lobe_exp, "value_slider", "min=1.0;max=256.0;step=1.0;ticks=true");
+		add_member_control(this, "R Grazing", r_grazing_strength, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
+		add_member_control(this, "R Shell Mix", r_shell_mix, "value_slider", "min=0.0;max=1.0;step=0.001;ticks=true");
+
+		add_decorator("TT Lobe", "heading", "level=3");
+		add_member_control(this, "TT Exp", tt_lobe_exp, "value_slider", "min=0.1;max=8.0;step=0.01;ticks=true");
+		add_member_control(this, "TT Min", tt_transmission_min, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+
+		add_decorator("TRT Lobe", "heading", "level=3");
+		add_member_control(this, "TRT Shift", trt_shift, "value_slider", "min=-1.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "TRT Exp", trt_lobe_exp, "value_slider", "min=1.0;max=128.0;step=1.0;ticks=true");
+		add_member_control(this, "TRT Strength", trt_strength, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
+		add_member_control(this, "TRT Interior Exp", trt_interior_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
+
+		add_decorator("Shell / Rim", "heading", "level=3");
+		add_member_control(this, "Shell Strength", shell_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "Shell Exp", shell_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
+		add_member_control(this, "Rim Strength", rim_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "Rim Exp", rim_exp, "value_slider", "min=0.1;max=8.0;step=0.01;ticks=true");
+
+		add_decorator("Alpha", "heading", "level=3");
+		add_member_control(this, "Alpha Root", alpha_root, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "Alpha Tip", alpha_tip, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+
+		add_decorator("DOM / Noise", "heading", "level=3");
+		add_member_control(this, "Tau Scale", tau_scale, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
+		add_member_control(this, "Tau Noise Min", tau_noise_min, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
+		add_member_control(this, "Tau Noise Max", tau_noise_max, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
+		add_member_control(this, "Tangent Noise Scale", tangent_noise_scale, "value_slider", "min=0.1;max=32.0;step=0.1;ticks=true");
+		add_member_control(this, "Tangent Noise Angle", tangent_noise_angle, "value_slider", "min=0.0;max=1.0;step=0.001;ticks=true");
+		add_member_control(this, "Tau Noise Scale", tau_noise_scale, "value_slider", "min=0.1;max=32.0;step=0.1;ticks=true");
+
+		add_decorator("Debug Views", "heading", "level=3");
+		add_member_control(this, "Show R", debug_show_r, "check");
+		add_member_control(this, "Show TT", debug_show_tt, "check");
+		add_member_control(this, "Show TRT", debug_show_trt, "check");
+		add_member_control(this, "Show SSS", debug_show_sss, "check");
+		add_member_control(this, "Show Shell", debug_show_shell, "check");
+		add_member_control(this, "Show Rim", debug_show_rim, "check");
+		add_member_control(this, "Show Tau", debug_show_tau, "check");
+		add_member_control(this, "Show Alpha", debug_show_alpha, "check");
 	}
 
 	bool init(cgv::render::context& ctx) {
@@ -375,12 +486,12 @@ public:
 		external_occluders_depth_map.set_mag_filter(TF_LINEAR);
 		external_occluders_depth_map.set_border_color(1.0f, 1.0f, 1.0f, 1.0f);
 
-		dom_tau.create(ctx, TextureType::TT_2D, shadow_map_resolution, shadow_map_resolution);
-		dom_tau.set_wrap_s(TW_CLAMP_TO_BORDER);
-		dom_tau.set_wrap_t(TW_CLAMP_TO_BORDER);
-		dom_tau.set_min_filter(TF_NEAREST);
-		dom_tau.set_mag_filter(TF_NEAREST);
-		dom_tau.set_border_color(1.0f, 1.0f, 1.0f, 1.0f);
+		dom_tau_array.create(ctx, TextureType::TT_2D_ARRAY, shadow_map_resolution, shadow_map_resolution, dom_layer_count);
+		dom_tau_array.set_wrap_s(TW_CLAMP_TO_BORDER);
+		dom_tau_array.set_wrap_t(TW_CLAMP_TO_BORDER);
+		dom_tau_array.set_min_filter(TF_NEAREST);
+		dom_tau_array.set_mag_filter(TF_NEAREST);
+		dom_tau_array.set_border_color(0.0f, 0.0f, 0.0f, 0.0f);
 
 		success &= fb.create(ctx, 512, 512);
 		success &= fb.attach(ctx, irradianceBasis[0], 0, 0);
@@ -401,7 +512,7 @@ public:
 		success &= external_occluders_shadow_map.attach(ctx, external_occluders_depth_map);
 
 		success &= dom_fb.create(ctx, shadow_map_resolution, shadow_map_resolution);
-		success &= dom_fb.attach(ctx, dom_tau, 0, 0);
+		success &= dom_fb.attach(ctx, dom_tau_array, 0, 0);
 
 		success &= blur_fb.create(ctx, 512, 512);
 
@@ -514,14 +625,19 @@ public:
 		glBlendEquation(GL_FUNC_ADD);
 		glBlendFunc(GL_ONE, GL_ONE);
 
-		const float zero_dom[4] = { 0, 0, 0, 0 };
-		glClearBufferfv(GL_COLOR, 0, zero_dom);
+		// Clear all layers of the DOM texture array
+		clear_dom_texture_array(ctx);
 
 		dom_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * fur.transformation_matrix);
 		dom_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
+		dom_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
 		dom_shader.set_uniform(ctx, "widthTip", widthTip);
 		dom_shader.set_uniform(ctx, "widthRoot", widthRoot);
-		dom_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+
+		// New uniforms for layered DOM
+		dom_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
+		dom_shader.set_uniform(ctx, "u_domNear", dom_near);
+		dom_shader.set_uniform(ctx, "u_domFar", dom_far);
 
 		fur.set_modelview(rctx);
 		fur.va.enable(ctx);
@@ -625,7 +741,7 @@ public:
 		irradianceBasis[3].enable(ctx, 3);
 		irradianceBasis[4].enable(ctx, 4);
 		fur.albedo_tex.enable(ctx, 5);
-		dom_tau.enable(ctx, 6);
+		dom_tau_array.enable(ctx, 6);
 
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis0", 0);
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis1", 1);
@@ -634,6 +750,9 @@ public:
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis4", 4);
 		hair_buffer_shader.set_uniform(ctx, "fur_color", 5);
 		hair_buffer_shader.set_uniform(ctx, "u_domTau", 6);
+		hair_buffer_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
+		hair_buffer_shader.set_uniform(ctx, "u_domNear", dom_near);
+		hair_buffer_shader.set_uniform(ctx, "u_domFar", dom_far);
 
 		hair_buffer_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
 		hair_buffer_shader.set_uniform(ctx, "u_model_normal_matrix", rctx.get_normal_matrix(fur.transformation_matrix));
@@ -652,12 +771,59 @@ public:
 		hair_buffer_shader.set_uniform(ctx, "u_lightColor", light.color);
 		hair_buffer_shader.set_uniform(ctx, "u_ambient", cgv::vec3(0.2f, 0.2f, 0.2f));
 
+		hair_buffer_shader.set_uniform(ctx, "u_scatterStrength", scatterStrength);
+
+		hair_buffer_shader.set_uniform(ctx, "u_w0", basis_w0);
+		hair_buffer_shader.set_uniform(ctx, "u_w1", basis_w1);
+		hair_buffer_shader.set_uniform(ctx, "u_w2", basis_w2);
+		hair_buffer_shader.set_uniform(ctx, "u_w3", basis_w3);
+		hair_buffer_shader.set_uniform(ctx, "u_w4", basis_w4);
+
+		hair_buffer_shader.set_uniform(ctx, "u_rLobeExp", r_lobe_exp);
+		hair_buffer_shader.set_uniform(ctx, "u_rGrazingStrength", r_grazing_strength);
+		hair_buffer_shader.set_uniform(ctx, "u_rShellMix", r_shell_mix);
+
+		hair_buffer_shader.set_uniform(ctx, "u_ttLobeExp", tt_lobe_exp);
+		hair_buffer_shader.set_uniform(ctx, "u_ttTransmissionMin", tt_transmission_min);
+
+		hair_buffer_shader.set_uniform(ctx, "u_trtShift", trt_shift);
+		hair_buffer_shader.set_uniform(ctx, "u_trtLobeExp", trt_lobe_exp);
+		hair_buffer_shader.set_uniform(ctx, "u_trtStrength", trt_strength);
+		hair_buffer_shader.set_uniform(ctx, "u_trtInteriorExp", trt_interior_exp);
+
+		hair_buffer_shader.set_uniform(ctx, "u_sssMaskExp", sss_mask_exp);
+		hair_buffer_shader.set_uniform(ctx, "u_sssStrength", sss_strength);
+
+		hair_buffer_shader.set_uniform(ctx, "u_shellStrength", shell_strength);
+		hair_buffer_shader.set_uniform(ctx, "u_shellExp", shell_exp);
+		hair_buffer_shader.set_uniform(ctx, "u_rimStrength", rim_strength);
+		hair_buffer_shader.set_uniform(ctx, "u_rimExp", rim_exp);
+
+		hair_buffer_shader.set_uniform(ctx, "u_alphaRoot", alpha_root);
+		hair_buffer_shader.set_uniform(ctx, "u_alphaTip", alpha_tip);
+
+		hair_buffer_shader.set_uniform(ctx, "u_tauScale", tau_scale);
+		hair_buffer_shader.set_uniform(ctx, "u_tauNoiseMin", tau_noise_min);
+		hair_buffer_shader.set_uniform(ctx, "u_tauNoiseMax", tau_noise_max);
+		hair_buffer_shader.set_uniform(ctx, "u_tangentNoiseScale", tangent_noise_scale);
+		hair_buffer_shader.set_uniform(ctx, "u_tangentNoiseAngle", tangent_noise_angle);
+		hair_buffer_shader.set_uniform(ctx, "u_tauNoiseScale", tau_noise_scale);
+
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowR", debug_show_r);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowTT", debug_show_tt);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowTRT", debug_show_trt);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowSSS", debug_show_sss);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowShell", debug_show_shell);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowRim", debug_show_rim);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowTau", debug_show_tau);
+		hair_buffer_shader.set_uniform(ctx, "u_debugShowAlpha", debug_show_alpha);
+
 		fur.set_modelview(rctx);
 		fur.va.enable(ctx);
 		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
 		fur.va.disable(ctx);
 
-		dom_tau.disable(ctx);
+		dom_tau_array.disable(ctx);
 		fur.albedo_tex.disable(ctx);
 		irradianceBasis[4].disable(ctx);
 		irradianceBasis[3].disable(ctx);
@@ -1196,6 +1362,13 @@ public:
 				verts.push_back({ radius * p11, p11, cgv::vec2(0.0f, 0.0f) });
 			}
 		}
+	}
+
+	void clear_dom_texture_array(cgv::render::context& ctx) {
+		const float zero = 0.0f;
+		GLuint tex_id = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_tau_array.handle));
+		
+		glClearTexImage(tex_id, 0, GL_RED, GL_FLOAT, &zero);
 	}
 };
 
