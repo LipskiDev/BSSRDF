@@ -1,0 +1,3 @@
+vertex_file:thickness.glvs
+vertex_file:view.glsl
+fragment_file:thickness.glfs

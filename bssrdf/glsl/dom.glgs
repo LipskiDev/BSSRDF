@@ -14,6 +14,7 @@ in VS_OUT {
 out GS_OUT {
     float vAlong;
     float side;
+    float lightDepth01;
 } gs_out;
 
 void main()
@@ -31,6 +32,7 @@ void main()
         gl_Position = gl_in[i].gl_Position;
         gs_out.vAlong = gs_in[i].vAlong;
         gs_out.side = gs_in[i].side;
+        gs_out.lightDepth01 = gs_in[i].lightDepth01;
         EmitVertex();
     }
     EndPrimitive();

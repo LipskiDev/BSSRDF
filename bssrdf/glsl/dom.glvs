@@ -19,7 +19,7 @@ out VS_OUT {
 
 void main()
 {
-    float taper = pow(a_vAlong, 0.7);
+    float taper = pow(clamp(a_vAlong, 0.0, 1.0), 0.7);
     float width = mix(widthRoot, widthTip, taper);
 
     vec3 T = normalize(a_tan);
@@ -37,7 +37,7 @@ void main()
     vec4 lightPos = u_lightSpaceMatrix * vec4(pos, 1.0);
     gl_Position = lightPos;
 
-    float ndcZ = lightPos.z / lightPos.w;
+    float ndcZ = lightPos.z / max(lightPos.w, 1e-6);
     vs_out.lightDepth01 = clamp(ndcZ * 0.5 + 0.5, 0.0, 1.0);
 
     vs_out.vAlong = a_vAlong;

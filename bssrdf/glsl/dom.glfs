@@ -5,6 +5,7 @@ layout(location = 0) out float outTau;
 in GS_OUT {
     float vAlong;
     float side;
+    float lightDepth01;
 } fs_in;
 
 void main()

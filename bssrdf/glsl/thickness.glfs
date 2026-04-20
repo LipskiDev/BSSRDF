@@ -1,0 +1,17 @@
+#version 430
+
+layout(location=0) out float outThickness;
+
+in VS_OUT {
+    vec3 posOS;
+    vec3 T;
+    vec3 V;
+    float vAlong;
+    vec2 rootUV;
+} fs_in;
+
+void main()
+{
+    float alpha = mix(0.4, 0.18, clamp(fs_in.vAlong, 0.0, 1.0));
+    outThickness = alpha * 0.08;
+}

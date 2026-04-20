@@ -1,0 +1,44 @@
+#version 330
+
+mat4 get_modelview_projection_matrix();
+mat4 get_modelview_matrix();
+
+layout(location = 0) in vec3 in_center;
+layout(location = 1) in vec3 in_tan;
+layout(location = 2) in vec2 in_rootUV;
+layout(location = 3) in float in_vAlong;
+layout(location = 4) in float in_side;
+
+uniform float u_widthRoot = 0.0040;
+uniform float u_widthTip = 0.0015;
+
+out VS_OUT {
+    vec3 posOS;
+    vec3 T;
+    vec3 V;
+    float vAlong;
+    vec2 rootUV;
+} vs_out;
+
+void main()
+{
+    mat4 invMV = inverse(get_modelview_matrix());
+    vec3 cameraPosOS = vec3(invMV[3]);
+
+    vec3 T = normalize(in_tan);
+    vec3 V = normalize(cameraPosOS - in_center);
+
+    float taper = pow(in_vAlong, 0.7);
+    float width = mix(u_widthRoot, u_widthTip, taper);
+
+    vec3 N = normalize(cross(T, V));
+    vec3 pos = in_center + N * (in_side * width * 0.5);
+
+    vs_out.posOS = pos;
+    vs_out.T = T;
+    vs_out.V = normalize(cameraPosOS - pos);
+    vs_out.vAlong = in_vAlong;
+    vs_out.rootUV = in_rootUV;
+
+    gl_Position = get_modelview_projection_matrix() * vec4(pos, 1.0);
+}

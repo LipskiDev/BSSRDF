@@ -11,7 +11,8 @@ uniform sampler2D u_IrradianceBasis4;
 uniform sampler2D fur_color;
 uniform sampler2DArray u_domTau;
 uniform int u_domLayerCount;
- 
+uniform sampler2D u_viewThickness;
+
 uniform float u_w0;
 uniform float u_w1;
 uniform float u_w2;
@@ -72,6 +73,19 @@ in VS_OUT {
 uniform vec3 u_lightdir;
 uniform vec3 u_lightColor;
 
+const float EPS = 1e-6;
+const float PI  = 3.14159265359;
+
+float saturate(float x)
+{
+    return clamp(x, 0.0, 1.0);
+}
+
+float safePow(float x, float e)
+{
+    return pow(max(x, 0.0), e);
+}
+
 float sampleDOMTransmittance(vec2 uv, float lightDepth01)
 {
     int maxLayer = int(floor(lightDepth01 * float(u_domLayerCount)));
@@ -82,12 +96,27 @@ float sampleDOMTransmittance(vec2 uv, float lightDepth01)
     for (int i = 0; i <= maxLayer; ++i) {
         tau += texture(u_domTau, vec3(uv, float(i))).r;
 
-        // early exit for performance + stability
         if (tau > 10.0)
             break;
     }
 
     return exp(-tau * u_tauScale);
+}
+
+vec3 sampleIrradianceBasis(vec2 uv)
+{
+    vec3 B0 = texture(u_IrradianceBasis0, uv).rgb;
+    vec3 B1 = texture(u_IrradianceBasis1, uv).rgb;
+    vec3 B2 = texture(u_IrradianceBasis2, uv).rgb;
+    vec3 B3 = texture(u_IrradianceBasis3, uv).rgb;
+    vec3 B4 = texture(u_IrradianceBasis4, uv).rgb;
+
+    return
+        u_w0 * B0 +
+        u_w1 * B1 +
+        u_w2 * B2 +
+        u_w3 * B3 +
+        u_w4 * B4;
 }
 
 void main()
@@ -96,12 +125,15 @@ void main()
     vec3 V = normalize(fs_in.V);
     vec3 L = normalize(-u_lightdir);
 
-    float noise = texture(fur_color, fs_in.rootUV * u_tangentNoiseScale).r;
-    float angle = (noise - 0.5) * u_tangentNoiseAngle;
+    // ------------------------------------------------------------
+    // Tangent perturbation
+    // ------------------------------------------------------------
+    float tangentNoise = texture(fur_color, fs_in.rootUV * u_tangentNoiseScale).r;
+    float angle = (tangentNoise - 0.5) * u_tangentNoiseAngle;
 
-    vec3 up = abs(T.y) < 0.99 ? vec3(0,1,0) : vec3(1,0,0);
-    vec3 N = normalize(cross(T, up));
-    T = normalize(T + N * angle);
+    vec3 up = abs(T.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 Np = normalize(cross(T, up));
+    T = normalize(T + Np * angle);
 
     float TL = dot(T, L);
     float TV = dot(T, V);
@@ -111,123 +143,245 @@ void main()
 
     vec3 H = normalize(L + V);
     float TH = dot(T, H);
+    float sinTH = sqrt(max(0.0, 1.0 - TH * TH));
 
+    // ------------------------------------------------------------
+    // DOM
+    // ------------------------------------------------------------
     vec4 lightClip = u_lightSpaceMatrix * vec4(fs_in.posOS, 1.0);
-    vec3 ndc = lightClip.xyz / lightClip.w;
+    vec3 ndc = lightClip.xyz / max(lightClip.w, EPS);
     vec2 uv = ndc.xy * 0.5 + 0.5;
 
-    float lightDepth01 = clamp(ndc.z * 0.5 + 0.5, 0.0, 1.0);
+    float lightDepth01 = saturate(ndc.z * 0.5 + 0.5);
     float Tl = sampleDOMTransmittance(uv, lightDepth01);
+
+    // tau after DOM
+    float tau = -log(max(Tl, EPS));
+
+    // stochastic variation in tau-space
     float noiseTl = texture(fur_color, fs_in.rootUV * u_tauNoiseScale).r;
     float noiseFactor = mix(u_tauNoiseMin, u_tauNoiseMax, noiseTl);
-    
-    // convert back to tau-space, apply noise, then back to T
-    float tauFromDOM = -log(max(Tl, 1e-6));
-    tauFromDOM *= noiseFactor;
-    Tl = exp(-tauFromDOM);
+    tau *= noiseFactor;
 
-    vec3 baseColor = texture(fur_color, fs_in.rootUV).rgb;
+    // stable remap back to transmission
+    Tl = exp(-tau);
 
-    float sinTH = sqrt(max(0.0, 1.0 - TH * TH));
-    float R_lobe = pow(sinTH, u_rLobeExp);
-    float grazing = pow(1.0 - abs(TL), 3.0);
+    // ------------------------------------------------------------
+    // View Thickness -> Layer Classification
+    // ------------------------------------------------------------
+    vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(u_viewThickness, 0));
+    float rawThickness = texture(u_viewThickness, screenUV).r;
+
+    // saturating optical remap
+    float thickness01 = 1.0 - exp(-rawThickness * 0.08);
+
+    // front / deep separation
+    float frontness = exp(-3.5 * thickness01);
+    float deepness  = 1.0 - frontness;
+
+    // root-tip
+    float rootness = 1.0 - fs_in.vAlong;
+    float tipness  = fs_in.vAlong;
+
+    // aggressively suppress deep root contributions
+    float baseFade = 1.0 - rootness * deepness;
+    baseFade = baseFade * baseFade;
+    baseFade = baseFade * baseFade;
+    baseFade = clamp(baseFade, 0.0, 1.0);
+
+    // ------------------------------------------------------------
+    // Base color
+    // ------------------------------------------------------------
+    vec3 p = fs_in.posOS;
+    vec3 baseColor = 0.5 + 0.5 * normalize(vec3(p.x, 0.0, p.z));
+
+    // ------------------------------------------------------------
+    // Alpha profile
+    // ------------------------------------------------------------
+    float alpha = saturate(mix(u_alphaRoot, u_alphaTip, fs_in.vAlong));
+    float alphaScatter = sqrt(alpha);
+
+    // ------------------------------------------------------------
+    // Hair lobes
+    // ------------------------------------------------------------
+    float R_lobe = safePow(sinTH, u_rLobeExp);
+    float grazing = safePow(1.0 - abs(TL), 3.0);
 
     vec3 R = u_lightColor * R_lobe;
     R *= (0.6 + u_rGrazingStrength * grazing);
-    R *= mix(1.0, Tl, u_rShellMix);
+    R *= mix(1.0, Tl, saturate(u_rShellMix));
 
-    float TT_lobe = pow(sinTL, u_ttLobeExp);
-    vec3 TT = baseColor * TT_lobe * u_lightColor;
+    float TT_lobe = safePow(sinTL, u_ttLobeExp);
+    vec3 TT = baseColor * u_lightColor * TT_lobe;
     TT *= mix(u_ttTransmissionMin, 1.0, Tl);
 
     float t = clamp(TH + u_trtShift, -1.0, 1.0);
-    float TRT_lobe = pow(sqrt(max(0.0, 1.0 - t * t)), u_trtLobeExp);
+    float TRT_lobe = safePow(max(1.0 - abs(t), 0.0), u_trtLobeExp);
 
     vec3 TRT = baseColor * u_lightColor * TRT_lobe;
-    TRT *= pow(1.0 - Tl, u_trtInteriorExp);
+    TRT *= mix(0.2, 1.0, 1.0 - Tl);
     TRT *= u_trtStrength;
 
-    vec3 B0 = texture(u_IrradianceBasis0, fs_in.rootUV).rgb;
-    vec3 B1 = texture(u_IrradianceBasis1, fs_in.rootUV).rgb;
-    vec3 B2 = texture(u_IrradianceBasis2, fs_in.rootUV).rgb;
-    vec3 B3 = texture(u_IrradianceBasis3, fs_in.rootUV).rgb;
-    vec3 B4 = texture(u_IrradianceBasis4, fs_in.rootUV).rgb;
+    // ------------------------------------------------------------
+    // Multiple scattering
+    // ------------------------------------------------------------
+    vec3 basisIrradiance = sampleIrradianceBasis(fs_in.rootUV);
 
-    vec3 Sss =
-        (u_w0 * B0 +
-         u_w1 * B1 +
-         u_w2 * B2 +
-         u_w3 * B3 +
-         u_w4 * B4);
+    float tauMask = safePow(1.0 - exp(-tau), u_sssMaskExp);
+    float diffusionProfile = tau * exp(-tau);
 
-    float scatterMask = pow(1.0 - Tl, u_sssMaskExp);
+    float forwardScatter = safePow(saturate(dot(L, -V)), 2.0);
+    float sideScatter = sinTL * sinTV;
+    float directionalScatter = mix(sideScatter, forwardScatter, 0.5);
 
-    Sss *= baseColor;
-    Sss *= u_scatterStrength;
-    Sss *= scatterMask * u_sssStrength;
+    vec3 Sss = basisIrradiance * baseColor;
+    Sss *= u_scatterStrength * u_sssStrength;
+    Sss *= tauMask * diffusionProfile;
+    Sss *= (0.35 + 0.65 * directionalScatter);
+    Sss *= mix(0.25, 1.0, deepness);
 
-    float shell = pow(Tl, u_shellExp);
+    // ------------------------------------------------------------
+    // Deep volume color
+    // ------------------------------------------------------------
+    float density = 1.0 - Tl;
+
+    vec3 deepScatter = baseColor * u_lightColor;
+    deepScatter *= safePow(density, 1.5);
+    deepScatter *= 0.18;
+    deepScatter *= deepness;
+    deepScatter *= baseFade;
+
+    // strand breakup
+    float strandNoise = texture(fur_color, fs_in.rootUV * 12.0).r;
+    float breakup = mix(0.8, 1.2, strandNoise);
+    Sss *= breakup;
+    deepScatter *= breakup;
+
+    // ------------------------------------------------------------
+    // Support terms
+    // ------------------------------------------------------------
+    float shell = safePow(Tl, u_shellExp);
     vec3 shellBoost = baseColor * u_shellStrength * shell;
 
-    float rim = pow(1.0 - abs(dot(T, V)), u_rimExp);
+    float rim = safePow(1.0 - abs(TV), u_rimExp);
     vec3 rimLight = baseColor * u_rimStrength * rim;
 
-    float alpha = mix(u_alphaRoot, u_alphaTip, fs_in.vAlong);
-    float alphaScatter = sqrt(clamp(alpha, 0.0, 1.0));
+    shellBoost *= mix(0.65, 1.0, frontness);
+    rimLight   *= mix(0.65, 1.0, frontness);
 
+    // ------------------------------------------------------------
+    // Mild energy balancing for single scatter only
+    // ------------------------------------------------------------
+    vec3 singleScatter = R + TT + TRT;
+    float singlePeak = max(max(singleScatter.r, singleScatter.g), singleScatter.b);
+    if (singlePeak > 1.35)
+    {
+        float inv = 1.35 / singlePeak;
+        R   *= inv;
+        TT  *= inv;
+        TRT *= inv;
+    }
+
+    // ------------------------------------------------------------
+    // Debug outputs
+    // ------------------------------------------------------------
     if (u_debugShowR) {
         outAccum = vec4(R * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowTT) {
         outAccum = vec4(TT * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowTRT) {
         outAccum = vec4(TRT * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowSSS) {
         outAccum = vec4(Sss * alphaScatter * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowShell) {
         outAccum = vec4(shellBoost * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowRim) {
         outAccum = vec4(rimLight * alpha, alpha);
         outLogR = log(max(1.0 - alpha, 1e-4));
         return;
     }
+
     if (u_debugShowTau) {
-        float tauDbg = -log(max(Tl, 1e-6));
-        vec3 dbg = vec3(clamp(tauDbg * 0.25, 0.0, 1.0));
-        outAccum = vec4(dbg, 1.0);
+        float tauDbg = clamp(tau * 0.25, 0.0, 1.0);
+        outAccum = vec4(vec3(tauDbg), 1.0);
         outLogR = 0.0;
         return;
     }
+
     if (u_debugShowAlpha) {
         outAccum = vec4(vec3(alpha), 1.0);
         outLogR = 0.0;
         return;
     }
 
+    // ------------------------------------------------------------
+    // Layered composition
+    // ------------------------------------------------------------
+    vec3 frontSpec =
+        R  * mix(0.45, 2.8, frontness) +
+        TT * mix(0.65, 1.9, frontness);
+
+    vec3 interiorSpec =
+        TRT * mix(0.8, 1.05, deepness);
+
+    vec3 interiorVolume =
+        (Sss * alphaScatter * 0.5) +
+        (deepScatter * 0.4);
+
+    interiorVolume *= mix(0.5, 1.0, deepness);
+
     vec3 C =
-        R +
-        TT +
-        TRT +
-        Sss * alphaScatter +
+        frontSpec +
+        interiorSpec +
+        interiorVolume +
         shellBoost +
         rimLight;
 
-    outAccum = vec4(C * alpha, alpha);
+    C *= baseFade;
 
-    float oneMinusA = max(1.0 - alpha, 1e-4);
-    outLogR = log(oneMinusA);
+    float viewFiber = safePow(1.0 - abs(dot(T, V)), 0.7);
+    C *= mix(0.8, 1.05, viewFiber);
+
+    // ------------------------------------------------------------
+    // Alpha / OIT
+    // ------------------------------------------------------------
+    float alphaSurface = alpha * mix(0.75, 1.0, frontness);
+    float alphaVolume  = alpha * deepness * 0.03;
+
+    float alphaCombined = clamp(alphaSurface + alphaVolume, 0.0, 0.999);
+    alphaCombined *= baseFade;
+
+    float frontBoost = safePow(frontness, 3.0) * 4.0;
+    float depthKill  = safePow(1.0 - deepness, 3.0);
+
+    float weight = alphaCombined * (0.05 + frontBoost) * depthKill;
+    weight = max(weight, 1e-4);
+
+    // ------------------------------------------------------------
+    // Outputs
+    // ------------------------------------------------------------
+    outAccum = vec4(C * alphaCombined * weight, alphaCombined * weight);
+
+    float alphaWeighted = clamp(alphaCombined * weight, 0.0, 0.999);
+    outLogR = log(max(1.0 - alphaWeighted, 1e-4));
 }

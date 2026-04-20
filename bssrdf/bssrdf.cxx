@@ -170,6 +170,10 @@ protected:
 	scene_object<vertex> sphere;
 	scene_object<vertex> floor;
 
+	texture view_thickness;
+	frame_buffer thickness_fb;
+	shader_program thickness_shader;
+
 	bool show_euv = false;
 
 	directional_light light;
@@ -190,7 +194,7 @@ protected:
 	float basis_w3 = 0.14f;
 	float basis_w4 = 0.08f;
 
-	float r_lobe_exp = 80.0f;
+	float r_lobe_exp = 8.0f;
 	float r_grazing_strength = 1.8f;
 	float r_shell_mix = 0.02f;
 
@@ -198,9 +202,9 @@ protected:
 	float tt_transmission_min = 0.1f;
 
 	float trt_shift = 0.2f;
-	float trt_lobe_exp = 20.0f;
-	float trt_strength = 0.35f;
-	float trt_interior_exp = 1.8f;
+	float trt_lobe_exp = 6.0f;
+	float trt_strength = 1.2f;
+	float trt_interior_exp = 0.75f;
 
 	float sss_mask_exp = 1.8f;
 	float sss_strength = 0.18f;
@@ -261,6 +265,7 @@ public:
 		scene_texture = cgv::render::texture{ "flt16[R,G,B]" };
 		scene_depth = cgv::render::texture{ "flt16[D]" };
 		dom_tau_array = cgv::render::texture{ "flt16[R]" };
+		view_thickness = cgv::render::texture{ "flt16[R]" };
 	}
 
 	std::string get_type_name(void) const { return "bssrdf"; }
@@ -281,10 +286,10 @@ public:
 		add_member_control(this, "Show E(u,v)", show_euv, "check");
 
 		add_decorator("Light Direction", "heading", "level=3");
-		add_member_control(this, "X", light.direction[0], "value_slider", "min=0;max=1;step=0.01;ticks=true");
-		add_member_control(this, "Y", light.direction[1], "value_slider", "min=0;max=1;step=0.01;ticks=true");
-		add_member_control(this, "Z", light.direction[2], "value_slider", "min=0;max=1;step=0.01;ticks=true");
-
+		add_member_control(this, "X", light.direction[0], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
+		add_member_control(this, "Y", light.direction[1], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
+		add_member_control(this, "Z", light.direction[2], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
+		
 		add_decorator("Fur Geometry", "heading", "level=3");
 		add_member_control(this, "Fur Tip Width", widthTip, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
 		add_member_control(this, "Fur Root Width", widthRoot, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
@@ -379,6 +384,11 @@ public:
 		}
 		if (!dom_shader.build_program(ctx, "dom.glpr")) {
 			std::cerr << "could not build DOM shader program\n";
+			exit(0);
+		}
+
+		if (!thickness_shader.build_program(ctx, "thickness.glpr")) {
+			std::cerr << "could not build thickness shader program\n";
 			exit(0);
 		}
 
@@ -493,6 +503,17 @@ public:
 		dom_tau_array.set_mag_filter(TF_NEAREST);
 		dom_tau_array.set_border_color(0.0f, 0.0f, 0.0f, 0.0f);
 
+		view_thickness.create(ctx, TextureType::TT_2D, ctx.get_width(), ctx.get_height());
+		view_thickness.set_wrap_r(TextureWrap::TW_CLAMP_TO_BORDER);
+		view_thickness.set_wrap_s(TextureWrap::TW_CLAMP_TO_BORDER);
+		view_thickness.set_wrap_t(TextureWrap::TW_CLAMP_TO_BORDER);
+		view_thickness.set_min_filter(TextureFilter::TF_LINEAR);
+		view_thickness.set_mag_filter(TextureFilter::TF_LINEAR);
+		view_thickness.set_border_color(0.0f, 0.0f, 0.0f, 0.0f);
+
+		success &= thickness_fb.create(ctx, ctx.get_width(), ctx.get_height());
+		success &= thickness_fb.attach(ctx, view_thickness, 0, 0);
+
 		success &= fb.create(ctx, 512, 512);
 		success &= fb.attach(ctx, irradianceBasis[0], 0, 0);
 
@@ -512,7 +533,6 @@ public:
 		success &= external_occluders_shadow_map.attach(ctx, external_occluders_depth_map);
 
 		success &= dom_fb.create(ctx, shadow_map_resolution, shadow_map_resolution);
-		success &= dom_fb.attach(ctx, dom_tau_array, 0, 0);
 
 		success &= blur_fb.create(ctx, 512, 512);
 
@@ -613,7 +633,6 @@ public:
 
 		// DOM PASS
 		dom_shader.enable(ctx);
-		dom_fb.enable(ctx, 0);
 
 		ctx.push_window_transformation_array();
 		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
@@ -628,13 +647,26 @@ public:
 		// Clear all layers of the DOM texture array
 		clear_dom_texture_array(ctx);
 
+		// Bind DOM FBO and attach the WHOLE array texture as layered target
+		GLuint fbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_fb.handle));
+		GLuint tex = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_tau_array.handle));
+
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, 0);
+
+		GLenum buf = GL_COLOR_ATTACHMENT0;
+		glDrawBuffers(1, &buf);
+
+		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE) {
+			std::cout << "DOM FBO ERROR: " << status << std::endl;
+		}
+
 		dom_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * fur.transformation_matrix);
 		dom_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
 		dom_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
 		dom_shader.set_uniform(ctx, "widthTip", widthTip);
 		dom_shader.set_uniform(ctx, "widthRoot", widthRoot);
-
-		// New uniforms for layered DOM
 		dom_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
 		dom_shader.set_uniform(ctx, "u_domNear", dom_near);
 		dom_shader.set_uniform(ctx, "u_domFar", dom_far);
@@ -644,7 +676,9 @@ public:
 		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
 		fur.va.disable(ctx);
 
-		dom_fb.disable(ctx);
+		// Unbind framebuffer
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 		dom_shader.disable(ctx);
 
 		glDisable(GL_BLEND);
@@ -710,6 +744,39 @@ public:
 		scene_fb.disable(ctx);
 		ctx.pop_modelview_matrix();
 
+		// VIEW-THICKNESS PASS
+		thickness_fb.enable(ctx, 0);
+		glViewport(0, 0, ctx.get_width(), ctx.get_height());
+
+		const float zero1[4] = { 0, 0, 0, 0 };
+		glClearBufferfv(GL_COLOR, 0, zero1);
+
+		glDisable(GL_CULL_FACE);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendEquation(GL_FUNC_ADD);
+		glBlendFunc(GL_ONE, GL_ONE);
+
+		thickness_shader.enable(ctx);
+
+		thickness_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
+		thickness_shader.set_uniform(ctx, "u_model_normal_matrix", rctx.get_normal_matrix(fur.transformation_matrix));
+		thickness_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		thickness_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
+
+		fur.set_modelview(rctx);
+		fur.va.enable(ctx);
+		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
+		fur.va.disable(ctx);
+
+		thickness_shader.disable(ctx);
+		thickness_fb.disable(ctx);
+
+		glDisable(GL_BLEND);
+		glDepthMask(GL_TRUE);
+
 		// HAIR BUFFER PASS
 		glDisable(GL_BLEND);
 
@@ -742,6 +809,7 @@ public:
 		irradianceBasis[4].enable(ctx, 4);
 		fur.albedo_tex.enable(ctx, 5);
 		dom_tau_array.enable(ctx, 6);
+		view_thickness.enable(ctx, 7);
 
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis0", 0);
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis1", 1);
@@ -750,6 +818,7 @@ public:
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis4", 4);
 		hair_buffer_shader.set_uniform(ctx, "fur_color", 5);
 		hair_buffer_shader.set_uniform(ctx, "u_domTau", 6);
+		hair_buffer_shader.set_uniform(ctx, "u_viewThickness", 7);
 		hair_buffer_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
 		hair_buffer_shader.set_uniform(ctx, "u_domNear", dom_near);
 		hair_buffer_shader.set_uniform(ctx, "u_domFar", dom_far);
@@ -1199,11 +1268,11 @@ public:
 		const uint32_t STRAND_POINTS = 12;
 		const float PATCH_WIDTH = 1.6f;
 		const float PATCH_DEPTH = 1.6f;
-		const float LENGTH_MIN = 0.35f;
-		const float LENGTH_MAX = 0.75f;
+		const float LENGTH_MIN = 0.22f;
+		const float LENGTH_MAX = 0.90f;
 
 		const cgv::vec3 BASE_DIR =
-			cgv::math::normalize(cgv::vec3(1.0f, 0.25f, 0.15f));
+			cgv::math::normalize(cgv::vec3(1.0f, 0.22f, 0.12f));
 
 		verts.clear();
 		verts.reserve(STRAND_AMOUNT * (STRAND_POINTS - 1) * 6);
@@ -1229,57 +1298,176 @@ public:
 			return x * x * (3.0f - 2.0f * x);
 			};
 
+		auto hash21 = [](const cgv::vec2& p) {
+			float n = std::sin(p.x() * 127.1f + p.y() * 311.7f) * 43758.5453f;
+			return n - std::floor(n);
+			};
+
+		auto hash22 = [&](const cgv::vec2& p) {
+			return cgv::vec2(
+				hash21(p + cgv::vec2(17.0f, 3.0f)),
+				hash21(p + cgv::vec2(5.0f, 29.0f))
+			);
+			};
+
+		const int CLUMP_GRID_X = 8;
+		const int CLUMP_GRID_Z = 8;
+		std::vector<cgv::vec2> clumpCenters(CLUMP_GRID_X * CLUMP_GRID_Z);
+
+		for (int z = 0; z < CLUMP_GRID_Z; ++z) {
+			for (int x = 0; x < CLUMP_GRID_X; ++x) {
+				cgv::vec2 cellMin(
+					(float)x / (float)CLUMP_GRID_X,
+					(float)z / (float)CLUMP_GRID_Z
+				);
+				cgv::vec2 cellMax(
+					(float)(x + 1) / (float)CLUMP_GRID_X,
+					(float)(z + 1) / (float)CLUMP_GRID_Z
+				);
+
+				cgv::vec2 rnd = hash22(cgv::vec2((float)x, (float)z));
+				clumpCenters[z * CLUMP_GRID_X + x] =
+					cellMin + (cellMax - cellMin) * (0.6f * rnd + 0.2f);
+			}
+		}
+
+		auto nearest_clump = [&](const cgv::vec2& uv, cgv::vec2& outCenter, float& outDist2) {
+			outDist2 = 1e30f;
+			outCenter = cgv::vec2(0.5f, 0.5f);
+
+			for (const cgv::vec2& c : clumpCenters) {
+				cgv::vec2 d = uv - c;
+				float d2 = cgv::math::dot(d, d);
+				if (d2 < outDist2) {
+					outDist2 = d2;
+					outCenter = c;
+				}
+			}
+			};
+
 		for (uint32_t s = 0; s < STRAND_AMOUNT; ++s) {
 			cgv::vec2 rootUV(dist01(rng), dist01(rng));
-
-			float px = (rootUV.x() - 0.5f) * PATCH_WIDTH;
-			float pz = (rootUV.y() - 0.5f) * PATCH_DEPTH;
-			cgv::vec3 rootPos(px, 0.0f, pz);
 
 			float dx = std::abs(rootUV.x() - 0.5f) * 2.0f;
 			float dz = std::abs(rootUV.y() - 0.5f) * 2.0f;
 			float edge = std::max(dx, dz);
+
+			// Softer rectangular footprint
 			float centerFactor = 1.0f - smoothstep01(edge);
 
-			float strandLength = cgv::math::lerp(LENGTH_MIN, LENGTH_MAX, centerFactor);
+			// Add sparse holes / breakup so it stops reading as a solid sheet
+			float macroNoise = hash21(rootUV * 9.0f);
+			float microNoise = hash21(rootUV * 31.0f + cgv::vec2(4.2f, 1.7f));
+			float densityMask = 0.75f * centerFactor + 0.25f * macroNoise;
 
-			float yawJitter = 0.8f * jitter(rng);
-			float pitchJitter = 0.50f * jitter(rng);
+			// Random strand dropout
+			if (densityMask < 0.18f)
+				continue;
+			if (microNoise < 0.10f)
+				continue;
+
+			// Clumping
+			cgv::vec2 clumpCenter;
+			float clumpDist2 = 0.0f;
+			nearest_clump(rootUV, clumpCenter, clumpDist2);
+
+			float clumpRadius = 0.018f + 0.02f * hash21(clumpCenter * 13.7f);
+			float clumpT = std::exp(-clumpDist2 / std::max(1e-5f, clumpRadius * clumpRadius));
+
+			// Root position with slight pull toward clump center
+			cgv::vec2 rootUVClumped =
+				rootUV * (1.0f - 0.18f * clumpT) + clumpCenter * (0.18f * clumpT);
+
+			float px = (rootUVClumped.x() - 0.5f) * PATCH_WIDTH;
+			float pz = (rootUVClumped.y() - 0.5f) * PATCH_DEPTH;
+			cgv::vec3 rootPos(px, 0.0f, pz);
+
+			// Much more aggressive length variation
+			float lengthRnd = 0.55f + 0.9f * dist01(rng);
+			float clumpLengthBoost = 0.85f + 0.45f * clumpT;
+			float strandLength =
+				cgv::math::lerp(LENGTH_MIN, LENGTH_MAX, centerFactor) *
+				lengthRnd *
+				clumpLengthBoost;
+
+			// Some shorter broken hairs
+			if (dist01(rng) < 0.12f)
+				strandLength *= 0.45f + 0.35f * dist01(rng);
+
+			// Base orientation
+			float yawJitter = 1.1f * jitter(rng);
+			float pitchJitter = 0.75f * jitter(rng);
 
 			cgv::vec3 dir = BASE_DIR;
 			dir = rotate_y(dir, yawJitter);
 			dir = rotate_z(dir, pitchJitter);
+
+			// Clump directional coherence
+			float clumpYaw = (hash21(clumpCenter * 19.3f) - 0.5f) * 0.8f;
+			float clumpPitch = (hash21(clumpCenter * 7.9f) - 0.5f) * 0.35f;
+			dir = rotate_y(dir, clumpYaw * clumpT);
+			dir = rotate_z(dir, clumpPitch * clumpT);
 			dir = cgv::math::normalize(dir);
 
-			cgv::vec3 flowDir =
-				cgv::math::normalize(cgv::vec3(1.0f, 0.05f, 0.0f));
+			// Localized flow variation instead of one global uniform flow
+			cgv::vec3 flowDir = cgv::math::normalize(cgv::vec3(
+				0.75f + 0.55f * (hash21(rootUV * 5.0f) - 0.5f),
+				0.02f + 0.08f * hash21(rootUV * 11.0f + cgv::vec2(3.0f, 9.0f)),
+				0.35f * (hash21(rootUV * 7.0f + cgv::vec2(8.0f, 2.0f)) - 0.5f)
+			));
 
 			std::vector<strand_vertex> strip;
 			strip.reserve(STRAND_POINTS * 2);
 
+			float strandPhase = dist01(rng) * 6.2831853f;
+			float strandFreq = 1.5f + 2.0f * dist01(rng);
+			float strandAmp = (0.03f + 0.08f * dist01(rng)) * strandLength;
+
 			for (uint32_t i = 0; i < STRAND_POINTS; ++i) {
 				float t = float(i) / float(STRAND_POINTS - 1);
 				float bendAmount = t * t;
+				float tipAmount = std::pow(t, 1.5f);
 
+				// Stronger shape variation along the strand
 				cgv::vec3 tangent =
 					cgv::math::normalize((1.0f - bendAmount) * dir + bendAmount * flowDir);
-				tangent += cgv::vec3(
-					jitter(rng) * 0.1f,
-					jitter(rng) * 0.05f,
-					jitter(rng) * 0.1f
-				);
-				tangent = normalize(tangent);
 
-				float lift = 0.20f * std::sin(t * 1.2f);
+				tangent += cgv::vec3(
+					jitter(rng) * 0.12f,
+					jitter(rng) * 0.06f,
+					jitter(rng) * 0.12f
+				);
+
+				// Clump pull increases toward the tip
+				cgv::vec3 toClump = cgv::vec3(
+					(clumpCenter.x() - rootUV.x()) * PATCH_WIDTH,
+					0.0f,
+					(clumpCenter.y() - rootUV.y()) * PATCH_DEPTH
+				);
+				if (cgv::math::length(toClump) > 1e-5f) {
+					cgv::vec3 clumpDir = cgv::math::normalize(toClump);
+					tangent = cgv::math::normalize(
+						tangent * (1.0f - 0.22f * clumpT * tipAmount) +
+						clumpDir * (0.22f * clumpT * tipAmount)
+					);
+				}
+
+				float lift = 0.14f * std::sin(t * 1.8f + strandPhase * 0.3f);
+				float sway = std::sin(t * strandFreq + strandPhase) * strandAmp * tipAmount;
+
+				cgv::vec3 sideVec = cgv::math::normalize(cgv::math::cross(tangent, cgv::vec3(0.0f, 1.0f, 0.0f)));
+				if (cgv::math::length(sideVec) < 1e-5f)
+					sideVec = cgv::vec3(1.0f, 0.0f, 0.0f);
 
 				cgv::vec3 p = rootPos
-					+ dir * (strandLength * t * 0.65f)
-					+ flowDir * (strandLength * t * t * 0.55f)
-					+ cgv::vec3(0.0f, lift * strandLength, 0.0f);
+					+ dir * (strandLength * t * 0.50f)
+					+ flowDir * (strandLength * t * t * 0.70f)
+					+ cgv::vec3(0.0f, lift * strandLength + t * strandLength * 0.12f, 0.0f)
+					+ sideVec * sway;
 
 				strand_vertex vL{};
 				vL.center = p;
-				vL.tan = tangent;
+				vL.tan = cgv::math::normalize(tangent);
 				vL.rootUV = rootUV;
 				vL.VAlong = t;
 				vL.side = -1.0f;
