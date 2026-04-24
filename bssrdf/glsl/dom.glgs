@@ -4,6 +4,7 @@ layout(triangles) in;
 layout(triangle_strip, max_vertices = 3) out;
 
 uniform int u_domLayerCount;
+uniform float u_domDepthPower; // start with 0.35
 
 in VS_OUT {
     float vAlong;
@@ -15,6 +16,7 @@ out GS_OUT {
     float vAlong;
     float side;
     float lightDepth01;
+    float layer01;
 } gs_out;
 
 void main()
@@ -24,16 +26,28 @@ void main()
          gs_in[1].lightDepth01 +
          gs_in[2].lightDepth01) / 3.0;
 
-    int layer = int(floor(avgDepth01 * float(u_domLayerCount)));
-    layer = clamp(layer, 0, u_domLayerCount - 1);
+    avgDepth01 = clamp(avgDepth01, 0.0, 1.0);
+
+    // Non-linear slicing: distributes samples more usefully across DOM layers.
+    float warpedDepth = pow(avgDepth01, u_domDepthPower);
+
+    int maxLayer = max(u_domLayerCount - 1, 0);
+    int layer = int(round(warpedDepth * float(maxLayer)));
+    layer = clamp(layer, 0, maxLayer);
+
+    float layer01 = maxLayer > 0 ? float(layer) / float(maxLayer) : 0.0;
 
     for (int i = 0; i < 3; ++i) {
         gl_Layer = layer;
         gl_Position = gl_in[i].gl_Position;
+
         gs_out.vAlong = gs_in[i].vAlong;
         gs_out.side = gs_in[i].side;
         gs_out.lightDepth01 = gs_in[i].lightDepth01;
+        gs_out.layer01 = layer01;
+
         EmitVertex();
     }
+
     EndPrimitive();
 }

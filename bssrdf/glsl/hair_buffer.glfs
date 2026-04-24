@@ -239,6 +239,7 @@ void main()
     Sss *= tauMask * diffusionProfile;
     Sss *= (0.35 + 0.65 * directionalScatter);
     Sss *= mix(0.25, 1.0, deepness);
+    Sss *= mix(0.45, 1.25, deepness);
 
     // ------------------------------------------------------------
     // Deep volume color
@@ -246,9 +247,9 @@ void main()
     float density = 1.0 - Tl;
 
     vec3 deepScatter = baseColor * u_lightColor;
-    deepScatter *= safePow(density, 1.5);
-    deepScatter *= 0.18;
-    deepScatter *= deepness;
+    deepScatter *= safePow(density, 1.2);
+    deepScatter *= 0.55;
+    deepScatter *= mix(0.6, 1.25, deepness);
     deepScatter *= baseFade;
 
     // strand breakup
@@ -345,11 +346,11 @@ void main()
         TRT * mix(0.8, 1.05, deepness);
 
     vec3 interiorVolume =
-        (Sss * alphaScatter * 0.5) +
-        (deepScatter * 0.4);
+        (Sss * alphaScatter * 0.65) +
+        (deepScatter * 0.75);
 
     interiorVolume *= mix(0.5, 1.0, deepness);
-
+    
     vec3 C =
         frontSpec +
         interiorSpec +
@@ -357,31 +358,36 @@ void main()
         shellBoost +
         rimLight;
 
+    // ------------------------------------------------------------
+    // Final color shaping
+    // ------------------------------------------------------------
     C *= baseFade;
-
+    
+    // compress HDR overshoot before accumulation
+    C = C / (1.0 + 0.35 * C);
+    
     float viewFiber = safePow(1.0 - abs(dot(T, V)), 0.7);
-    C *= mix(0.8, 1.05, viewFiber);
-
+    C *= mix(0.9, 1.05, viewFiber);
+    
     // ------------------------------------------------------------
-    // Alpha / OIT
+    // Coverage alpha (separate from accumulation weight)
     // ------------------------------------------------------------
-    float alphaSurface = alpha * mix(0.75, 1.0, frontness);
-    float alphaVolume  = alpha * deepness * 0.03;
-
-    float alphaCombined = clamp(alphaSurface + alphaVolume, 0.0, 0.999);
-    alphaCombined *= baseFade;
-
-    float frontBoost = safePow(frontness, 3.0) * 4.0;
-    float depthKill  = safePow(1.0 - deepness, 3.0);
-
-    float weight = alphaCombined * (0.05 + frontBoost) * depthKill;
-    weight = max(weight, 1e-4);
-
+    float alphaCoverage = alpha;
+    alphaCoverage *= mix(1.0, 1.30, deepness);
+    alphaCoverage *= mix(1.0, 1.20, density);
+    alphaCoverage *= baseFade;
+    alphaCoverage = clamp(alphaCoverage, 0.0, 0.995);
+    
+    // ------------------------------------------------------------
+    // Accumulation weight (visual priority only)
+    // ------------------------------------------------------------
+    float frontBoost = 1.0 + 2.0 * safePow(frontness, 2.0);
+    float deepDamp   = mix(1.0, 0.65, deepness);
+    float weight     = max(frontBoost * deepDamp, 1e-4);
+    
     // ------------------------------------------------------------
     // Outputs
     // ------------------------------------------------------------
-    outAccum = vec4(C * alphaCombined * weight, alphaCombined * weight);
-
-    float alphaWeighted = clamp(alphaCombined * weight, 0.0, 0.999);
-    outLogR = log(max(1.0 - alphaWeighted, 1e-4));
+    outAccum = vec4(C * alphaCoverage * weight, alphaCoverage * weight);
+    outLogR  = log(max(1.0 - alphaCoverage, 1e-4));
 }

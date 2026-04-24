@@ -2,20 +2,30 @@
 
 layout(location = 0) out float outTau;
 
+uniform float u_tauScale;      // start with 0.08
+uniform float u_rootDensity;   // start with 1.0
+uniform float u_tipDensity;    // start with 0.35
+uniform float u_minRibbonTau;  // start with 0.25
+
 in GS_OUT {
     float vAlong;
     float side;
     float lightDepth01;
+    float layer01;
 } fs_in;
 
 void main()
 {
     float vAlong = clamp(fs_in.vAlong, 0.0, 1.0);
-    float side   = clamp(fs_in.side, -1.0, 1.0);
+    float sideAbs = abs(clamp(fs_in.side, -1.0, 1.0));
 
-    float along = mix(0.45, 1.0, 1.0 - vAlong);
-    float cross = pow(max(0.0, 1.0 - abs(side)), 0.8);
+    // Denser near root, thinner near tip.
+    float alongDensity = mix(u_rootDensity, u_tipDensity, vAlong);
 
-    float tau = 0.08 * along * cross;
+    // Do not collapse to zero at ribbon edge.
+    float ribbonProfile = mix(1.0, u_minRibbonTau, pow(sideAbs, 1.5));
+
+    float tau = u_tauScale * alongDensity * ribbonProfile;
+
     outTau = tau;
 }

@@ -156,6 +156,7 @@ protected:
 	texture hair_accum;
 	texture hair_reveal;
 	texture dom_tau_array;
+	GLuint dom_tau_array_gl = 0;
 	texture scene_texture;
 	texture scene_depth;
 
@@ -496,12 +497,46 @@ public:
 		external_occluders_depth_map.set_mag_filter(TF_LINEAR);
 		external_occluders_depth_map.set_border_color(1.0f, 1.0f, 1.0f, 1.0f);
 
-		dom_tau_array.create(ctx, TextureType::TT_2D_ARRAY, shadow_map_resolution, shadow_map_resolution, dom_layer_count);
-		dom_tau_array.set_wrap_s(TW_CLAMP_TO_BORDER);
-		dom_tau_array.set_wrap_t(TW_CLAMP_TO_BORDER);
-		dom_tau_array.set_min_filter(TF_NEAREST);
-		dom_tau_array.set_mag_filter(TF_NEAREST);
-		dom_tau_array.set_border_color(0.0f, 0.0f, 0.0f, 0.0f);
+		glGenTextures(1, &dom_tau_array_gl);
+		glObjectLabel(GL_TEXTURE, dom_tau_array_gl, -1, "DOM Tau Texture Array");
+		glBindTexture(GL_TEXTURE_2D_ARRAY, dom_tau_array_gl);
+
+		glTexImage3D(
+			GL_TEXTURE_2D_ARRAY,
+			0,
+			GL_R16F,
+			(GLsizei)shadow_map_resolution,
+			(GLsizei)shadow_map_resolution,
+			dom_layer_count,
+			0,
+			GL_RED,
+			GL_FLOAT,
+			nullptr
+		);
+
+		glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+		float border[4] = { 0, 0, 0, 0 };
+		glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border);
+
+		glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+		GLint depth = 0;
+		glBindTexture(GL_TEXTURE_2D_ARRAY, dom_tau_array_gl);
+		glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 0, GL_TEXTURE_DEPTH, &depth);
+		std::cout << "DOM Layers: " << depth << std::endl;
+		glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+		GLuint tex = (GLuint)(uintptr_t)dom_tau_array.handle;
+
+		GLint target = 0;
+		glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+		glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 0, GL_TEXTURE_DEPTH, &target);
+
+		std::cout << "DOM layers: " << target << std::endl;
 
 		view_thickness.create(ctx, TextureType::TT_2D, ctx.get_width(), ctx.get_height());
 		view_thickness.set_wrap_r(TextureWrap::TW_CLAMP_TO_BORDER);
@@ -533,12 +568,25 @@ public:
 		success &= external_occluders_shadow_map.attach(ctx, external_occluders_depth_map);
 
 		success &= dom_fb.create(ctx, shadow_map_resolution, shadow_map_resolution);
+		GLuint dom_fbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_fb.handle));
+		glObjectLabel(GL_FRAMEBUFFER, dom_fbo, -1, "DOM Layered FBO");
 
 		success &= blur_fb.create(ctx, 512, 512);
 
 		read_texture(ctx, floor.albedo_tex, "C:/dev/BSSRDF/bssrdf/res/floor_albedo.png");
 		read_texture(ctx, sphere.albedo_tex, "C:/dev/BSSRDF/bssrdf/res/floor_albedo.png");
 		read_texture(ctx, fur.albedo_tex, "C:/dev/BSSRDF/bssrdf/res/fur_color.png");
+
+		glObjectLabel(GL_TEXTURE, dom_tau_array_gl, -1, "DOM Tau Texture Array");
+
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)dom_fb.handle - 1, -1, "DOM FBO");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)scene_fb.handle - 1, -1, "Scene FBO");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)hair_fb.handle - 1, -1, "Hair Buffer FBO");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)thickness_fb.handle - 1, -1, "View Thickness FBO");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)all_occluders_shadow_map.handle - 1, -1, "Shadow FBO - All Occluders");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)external_occluders_shadow_map.handle - 1, -1, "Shadow FBO - External Occluders");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)fb.handle - 1, -1, "Irradiance FBO");
+		glObjectLabel(GL_FRAMEBUFFER, (GLuint)(uintptr_t)blur_fb.handle - 1, -1, "Blur FBO");
 
 		rctx.ctx = &ctx;
 		return success;
@@ -574,6 +622,7 @@ public:
 		rctx.light_matrix = light_matrix;
 
 		// SHADOW MAP: all occluders
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 10, -1, "Shadow Map - All Occluders");
 		ctx.push_window_transformation_array();
 		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
 
@@ -600,8 +649,10 @@ public:
 
 		shadow_mapping_shader.disable(ctx);
 		all_occluders_shadow_map.disable(ctx);
+		glPopDebugGroup();
 
 		// SHADOW MAP: external occluders
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 20, -1, "Shadow Map - External Occluders");
 		external_occluders_shadow_map.enable(ctx);
 		glDrawBuffer(GL_NONE);
 		glReadBuffer(GL_NONE);
@@ -630,8 +681,11 @@ public:
 		ctx.pop_window_transformation_array();
 
 		ctx.push_modelview_matrix();
+		glPopDebugGroup();
+
 
 		// DOM PASS
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "DOM Pass");
 		dom_shader.enable(ctx);
 
 		ctx.push_window_transformation_array();
@@ -645,14 +699,14 @@ public:
 		glBlendFunc(GL_ONE, GL_ONE);
 
 		// Clear all layers of the DOM texture array
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 1, -1, "DOM Clear");
 		clear_dom_texture_array(ctx);
+		glPopDebugGroup();
 
 		// Bind DOM FBO and attach the WHOLE array texture as layered target
 		GLuint fbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_fb.handle));
-		GLuint tex = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_tau_array.handle));
-
 		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-		glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex, 0);
+		glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, dom_tau_array_gl, 0);
 
 		GLenum buf = GL_COLOR_ATTACHMENT0;
 		glDrawBuffers(1, &buf);
@@ -672,14 +726,17 @@ public:
 		dom_shader.set_uniform(ctx, "u_domFar", dom_far);
 
 		fur.set_modelview(rctx);
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 2, -1, "DOM Draw Fur");
 		fur.va.enable(ctx);
 		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
 		fur.va.disable(ctx);
+		glPopDebugGroup();
 
 		// Unbind framebuffer
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 		dom_shader.disable(ctx);
+		glPopDebugGroup();
 
 		glDisable(GL_BLEND);
 		glDepthMask(GL_TRUE);
@@ -687,6 +744,7 @@ public:
 		ctx.pop_window_transformation_array();
 
 		// E(u,v)
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 40, -1, "Irradiance E(u,v) Pass");
 		euv_shader.enable(ctx);
 		euv_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
 		euv_shader.set_uniform(ctx, "u_lightRadiance", light.color);
@@ -703,13 +761,17 @@ public:
 		fb.disable(ctx);
 		external_occluders_depth_map.disable(ctx);
 		euv_shader.disable(ctx);
+		glPopDebugGroup();
 
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 50, -1, "Irradiance Blur Passes");
 		for (int i = 1; i < BLUR_PASSES; ++i) {
 			blur(ctx, irradianceBasis[0], cgv::vec2(1.0f, 0.0f), sigma[i], temp);
 			blur(ctx, temp, cgv::vec2(0.0f, 1.0f), sigma[i], irradianceBasis[i]);
 		}
+		glPopDebugGroup();
 
 		// OPAQUE SCENE
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 60, -1, "Opaque Scene Pass");
 		scene_fb.enable(ctx, 0);
 		glClearColor(1.0, 1.0, 1.0, 1.0);
 		glClearDepth(1.0);
@@ -743,8 +805,10 @@ public:
 		textured_surface.disable(ctx);
 		scene_fb.disable(ctx);
 		ctx.pop_modelview_matrix();
+		glPopDebugGroup();
 
 		// VIEW-THICKNESS PASS
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 70, -1, "View Thickness Pass");
 		thickness_fb.enable(ctx, 0);
 		glViewport(0, 0, ctx.get_width(), ctx.get_height());
 
@@ -773,11 +837,13 @@ public:
 
 		thickness_shader.disable(ctx);
 		thickness_fb.disable(ctx);
+		glPopDebugGroup();
 
 		glDisable(GL_BLEND);
 		glDepthMask(GL_TRUE);
 
 		// HAIR BUFFER PASS
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 80, -1, "Hair Buffer Pass");
 		glDisable(GL_BLEND);
 
 		hair_buffer_shader.enable(ctx);
@@ -808,7 +874,9 @@ public:
 		irradianceBasis[3].enable(ctx, 3);
 		irradianceBasis[4].enable(ctx, 4);
 		fur.albedo_tex.enable(ctx, 5);
-		dom_tau_array.enable(ctx, 6);
+		glActiveTexture(GL_TEXTURE6);
+		glBindTexture(GL_TEXTURE_2D_ARRAY, dom_tau_array_gl);
+		glActiveTexture(GL_TEXTURE0);
 		view_thickness.enable(ctx, 7);
 
 		hair_buffer_shader.set_uniform(ctx, "u_IrradianceBasis0", 0);
@@ -892,7 +960,9 @@ public:
 		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
 		fur.va.disable(ctx);
 
-		dom_tau_array.disable(ctx);
+		glActiveTexture(GL_TEXTURE6);
+		glBindTexture(GL_TEXTURE_2D_ARRAY, dom_tau_array_gl);
+		glActiveTexture(GL_TEXTURE0);
 		fur.albedo_tex.disable(ctx);
 		irradianceBasis[4].disable(ctx);
 		irradianceBasis[3].disable(ctx);
@@ -906,8 +976,10 @@ public:
 		glDepthMask(GL_TRUE);
 		glDisable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glPopDebugGroup();
 
 		// HAIR RESOLVE
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 90, -1, "Hair Resolve Pass");
 		hair_resolve_shader.enable(ctx);
 
 		hair_accum.enable(ctx, 0);
@@ -927,6 +999,7 @@ public:
 		hair_accum.disable(ctx);
 
 		hair_resolve_shader.disable(ctx);
+		glPopDebugGroup();
 	}
 
 	void blur(cgv::render::context& ctx, cgv::render::texture& src, cgv::vec2 direction, float sigma, cgv::render::texture& dest)
@@ -1554,9 +1627,7 @@ public:
 
 	void clear_dom_texture_array(cgv::render::context& ctx) {
 		const float zero = 0.0f;
-		GLuint tex_id = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_tau_array.handle));
-		
-		glClearTexImage(tex_id, 0, GL_RED, GL_FLOAT, &zero);
+		glClearTexImage(dom_tau_array_gl, 0, GL_RED, GL_FLOAT, &zero);
 	}
 };
 
