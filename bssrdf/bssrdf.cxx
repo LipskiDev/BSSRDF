@@ -181,29 +181,35 @@ protected:
 	float shadow_map_distance = 2.0f;
 	float shadow_map_resolution = 256 * 8;
 
-	float widthTip = 0.0035f;
-	float widthRoot = 0.012f;
+	float widthTip = 0.003f;
+	float widthRoot = 0.003f;
 
-	float sigma[5] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+	// Main variables, evaluated in documentation
+	float r_lobe_exp = 8.0f;
+	float tt_lobe_exp = 1.5f;
+	float trt_lobe_exp = 6.0f;
+	float tau_scale = 0.06f;
+	float dom_tau_scale = 0.08f;
 
-	// Hair shading debug / tuning
-	float scatterStrength = 1.0f;
-
+	// Secondary tuning parameter
+	// Also control the visual output, but are not discussed individually
+	// mainly serve as calibration and fine-tuning
 	float basis_w0 = 0.35f;
 	float basis_w1 = 0.25f;
 	float basis_w2 = 0.18f;
 	float basis_w3 = 0.14f;
 	float basis_w4 = 0.08f;
+	
+	float scatterStrength = 1.0f;
 
-	float r_lobe_exp = 8.0f;
 	float r_grazing_strength = 1.8f;
 	float r_shell_mix = 0.02f;
 
-	float tt_lobe_exp = 1.5f;
+	float sigma[5] = { 1.0f, 2.0f, 4.0f, 8.0f, 16.0f };
+
 	float tt_transmission_min = 0.1f;
 
 	float trt_shift = 0.2f;
-	float trt_lobe_exp = 6.0f;
 	float trt_strength = 1.2f;
 	float trt_interior_exp = 0.75f;
 
@@ -219,7 +225,6 @@ protected:
 	float alpha_root = 0.40f;
 	float alpha_tip = 0.18f;
 
-	float tau_scale = 0.5f;
 	float tau_noise_min = 0.7f;
 	float tau_noise_max = 1.3f;
 
@@ -227,10 +232,21 @@ protected:
 	float tangent_noise_angle = 0.25f;
 	float tau_noise_scale = 4.0f;
 
+	float dom_root_density = 1.0f;
+	float dom_tip_density = 0.35f;
+	float dom_min_ribbon_tau = 0.25f;
+
+	float hair_tau_scale = 1.0f;
+
 	int dom_layer_count = DOM_LAYER_COUNT;
 	float dom_near = 0.1f;
 	float dom_far = 10.0f;
 
+	float dom_depth_min01 = 0.0f;
+	float dom_depth_max01 = 1.0f;
+	float dom_depth_power = 1.0f;
+
+	// Debug visualization toggles
 	bool debug_show_r = false;
 	bool debug_show_tt = false;
 	bool debug_show_trt = false;
@@ -239,6 +255,9 @@ protected:
 	bool debug_show_rim = false;
 	bool debug_show_tau = false;
 	bool debug_show_alpha = false;
+
+	bool debug_show_DOM = true;
+	bool debug_use_depth = true;
 
 public:
 	bssrdf()
@@ -267,6 +286,7 @@ public:
 		scene_depth = cgv::render::texture{ "flt16[D]" };
 		dom_tau_array = cgv::render::texture{ "flt16[R]" };
 		view_thickness = cgv::render::texture{ "flt16[R]" };
+
 	}
 
 	std::string get_type_name(void) const { return "bssrdf"; }
@@ -282,51 +302,21 @@ public:
 	bool gui_check_value(cgv::gui::control<int>& ctrl) { return true; }
 	void gui_value_changed(cgv::gui::control<int>& ctrl) { post_redraw(); }
 
+
 	void create_gui(void) {
 		add_decorator("BSSRDF", "heading");
-		add_member_control(this, "Show E(u,v)", show_euv, "check");
 
-		add_decorator("Light Direction", "heading", "level=3");
-		add_member_control(this, "X", light.direction[0], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
-		add_member_control(this, "Y", light.direction[1], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
-		add_member_control(this, "Z", light.direction[2], "value_slider", "min=-1;max=1;step=0.01;ticks=true");
-		
-		add_decorator("Fur Geometry", "heading", "level=3");
-		add_member_control(this, "Fur Tip Width", widthTip, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
-		add_member_control(this, "Fur Root Width", widthRoot, "value_slider", "min=0.001;max=0.15;step=0.001;ticks=true");
-
-		add_decorator("Hair Scattering", "heading", "level=3");
-		add_member_control(this, "Scatter Strength", scatterStrength, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
-		add_member_control(this, "SSS Strength", sss_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "SSS Mask Exp", sss_mask_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
-
-		add_decorator("Basis Weights", "heading", "level=3");
-		add_member_control(this, "w0", basis_w0, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "w1", basis_w1, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "w2", basis_w2, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "w3", basis_w3, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "w4", basis_w4, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
+		add_member_control(this, "Show DOM", debug_show_DOM, "check");
+		add_member_control(this, "Use depth", debug_use_depth, "check");
 
 		add_decorator("R Lobe", "heading", "level=3");
 		add_member_control(this, "R Exp", r_lobe_exp, "value_slider", "min=1.0;max=256.0;step=1.0;ticks=true");
-		add_member_control(this, "R Grazing", r_grazing_strength, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
-		add_member_control(this, "R Shell Mix", r_shell_mix, "value_slider", "min=0.0;max=1.0;step=0.001;ticks=true");
 
 		add_decorator("TT Lobe", "heading", "level=3");
 		add_member_control(this, "TT Exp", tt_lobe_exp, "value_slider", "min=0.1;max=8.0;step=0.01;ticks=true");
-		add_member_control(this, "TT Min", tt_transmission_min, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
 
 		add_decorator("TRT Lobe", "heading", "level=3");
-		add_member_control(this, "TRT Shift", trt_shift, "value_slider", "min=-1.0;max=1.0;step=0.01;ticks=true");
 		add_member_control(this, "TRT Exp", trt_lobe_exp, "value_slider", "min=1.0;max=128.0;step=1.0;ticks=true");
-		add_member_control(this, "TRT Strength", trt_strength, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
-		add_member_control(this, "TRT Interior Exp", trt_interior_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
-
-		add_decorator("Shell / Rim", "heading", "level=3");
-		add_member_control(this, "Shell Strength", shell_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "Shell Exp", shell_exp, "value_slider", "min=0.1;max=4.0;step=0.01;ticks=true");
-		add_member_control(this, "Rim Strength", rim_strength, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
-		add_member_control(this, "Rim Exp", rim_exp, "value_slider", "min=0.1;max=8.0;step=0.01;ticks=true");
 
 		add_decorator("Alpha", "heading", "level=3");
 		add_member_control(this, "Alpha Root", alpha_root, "value_slider", "min=0.0;max=1.0;step=0.01;ticks=true");
@@ -334,26 +324,25 @@ public:
 
 		add_decorator("DOM / Noise", "heading", "level=3");
 		add_member_control(this, "Tau Scale", tau_scale, "value_slider", "min=0.0;max=4.0;step=0.01;ticks=true");
-		add_member_control(this, "Tau Noise Min", tau_noise_min, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
-		add_member_control(this, "Tau Noise Max", tau_noise_max, "value_slider", "min=0.0;max=2.0;step=0.01;ticks=true");
-		add_member_control(this, "Tangent Noise Scale", tangent_noise_scale, "value_slider", "min=0.1;max=32.0;step=0.1;ticks=true");
-		add_member_control(this, "Tangent Noise Angle", tangent_noise_angle, "value_slider", "min=0.0;max=1.0;step=0.001;ticks=true");
-		add_member_control(this, "Tau Noise Scale", tau_noise_scale, "value_slider", "min=0.1;max=32.0;step=0.1;ticks=true");
 
 		add_decorator("Debug Views", "heading", "level=3");
 		add_member_control(this, "Show R", debug_show_r, "check");
 		add_member_control(this, "Show TT", debug_show_tt, "check");
 		add_member_control(this, "Show TRT", debug_show_trt, "check");
-		add_member_control(this, "Show SSS", debug_show_sss, "check");
-		add_member_control(this, "Show Shell", debug_show_shell, "check");
-		add_member_control(this, "Show Rim", debug_show_rim, "check");
-		add_member_control(this, "Show Tau", debug_show_tau, "check");
-		add_member_control(this, "Show Alpha", debug_show_alpha, "check");
+
 	}
 
 	bool init(cgv::render::context& ctx) {
 		bool success = true;
 		view_ptr = find_view_as_node();
+
+		if (view_ptr) {
+			view_ptr->set_focus(cgv::vec3(0.15f, 0.5f, 0.15f));
+			view_ptr->set_y_extent_at_focus(1.9f);
+			view_ptr->set_view_dir(cgv::math::normalize(cgv::vec3(0.45f, -0.35f, -1.0f)));
+			view_ptr->set_view_up_dir(cgv::vec3(0.0f, 1.0f, 0.0f));
+
+		}
 
 		if (!bssrdf_shader.build_program(ctx, "bssrdf.glpr")) {
 			std::cerr << "could not build the bssrdf shader program\n";
@@ -609,240 +598,45 @@ public:
 	void draw(cgv::render::context& ctx) {
 		if (!view_ptr)
 			return;
+		update_light_matrices();
 
-		all_occluders_depth_map.set_compare_mode(true);
-		external_occluders_depth_map.set_compare_mode(true);
+		render_shadow_map__all_occluders(ctx);
+		render_shadow_map_external_occluders(ctx);
+		render_dom(ctx);
+		render_irradiance(ctx);
+		render_opaque_scene(ctx);
+		render_view_thickness(ctx);
+		render_hair_buffer(ctx);
+		render_resolve(ctx);
+	}
 
-		cgv::vec3 light_direction = normalize(light.direction);
-		cgv::mat4 light_projection = cgv::math::ortho4(-3.0f, 3.0f, -3.0f, 3.0f, 0.1f, 10.0f);
-		cgv::mat4 light_view = cgv::math::look_at4(5.0f * light_direction, cgv::vec3(1.0f, 1.0f, 1.0f), cgv::vec3(0.0f, 1.0f, 0.0f));
-		cgv::mat4 light_matrix = light_projection * light_view;
+	void render_resolve(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 90, -1, "Hair Resolve Pass");
+		hair_resolve_shader.enable(ctx);
 
-		rctx.store_view();
-		rctx.light_matrix = light_matrix;
+		hair_accum.enable(ctx, 0);
+		hair_reveal.enable(ctx, 1);
+		scene_texture.enable(ctx, 2);
 
-		// SHADOW MAP: all occluders
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 10, -1, "Shadow Map - All Occluders");
-		ctx.push_window_transformation_array();
-		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
+		hair_resolve_shader.set_uniform(ctx, "u_AccumTex", 0);
+		hair_resolve_shader.set_uniform(ctx, "u_logRTex", 1);
+		hair_resolve_shader.set_uniform(ctx, "u_sceneColor", 2);
+		hair_resolve_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		hair_resolve_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
 
-		all_occluders_shadow_map.enable(ctx);
-		glDrawBuffer(GL_NONE);
-		glReadBuffer(GL_NONE);
-		glDisable(GL_CULL_FACE);
-		glDisable(GL_BLEND);
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LESS);
-		glDepthMask(GL_TRUE);
-		glDisable(GL_STENCIL_TEST);
-		glClearDepth(1.0);
-		glClear(GL_DEPTH_BUFFER_BIT);
-
-		shadow_mapping_shader.enable(ctx);
-		shadow_mapping_shader.set_uniform(ctx, "u_widthTip", widthTip);
-		shadow_mapping_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
-		shadow_mapping_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
-
-		floor.draw_depth(rctx, shadow_mapping_shader);
-		fur.draw_depth(rctx, shadow_mapping_shader);
-		sphere.draw_depth(rctx, shadow_mapping_shader);
-
-		shadow_mapping_shader.disable(ctx);
-		all_occluders_shadow_map.disable(ctx);
-		glPopDebugGroup();
-
-		// SHADOW MAP: external occluders
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 20, -1, "Shadow Map - External Occluders");
-		external_occluders_shadow_map.enable(ctx);
-		glDrawBuffer(GL_NONE);
-		glReadBuffer(GL_NONE);
-		glDisable(GL_CULL_FACE);
-		glDisable(GL_BLEND);
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LESS);
-		glDepthMask(GL_TRUE);
-		glDisable(GL_STENCIL_TEST);
-		glClearDepth(1.0);
-		glClear(GL_DEPTH_BUFFER_BIT);
-
-		shadow_mapping_shader.enable(ctx);
-		shadow_mapping_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
-		shadow_mapping_shader.set_uniform(ctx, "u_widthTip", widthTip);
-		shadow_mapping_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
-
-		floor.draw_depth(rctx, shadow_mapping_shader);
-		sphere.draw_depth(rctx, shadow_mapping_shader);
-
-		shadow_mapping_shader.disable(ctx);
-		external_occluders_shadow_map.disable(ctx);
-
-		glEnable(GL_SCISSOR_TEST);
-		glEnable(GL_CULL_FACE);
-		ctx.pop_window_transformation_array();
-
-		ctx.push_modelview_matrix();
-		glPopDebugGroup();
-
-
-		// DOM PASS
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "DOM Pass");
-		dom_shader.enable(ctx);
-
-		ctx.push_window_transformation_array();
-		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
-
-		glDisable(GL_CULL_FACE);
-		glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
-		glEnable(GL_BLEND);
-		glBlendEquation(GL_FUNC_ADD);
-		glBlendFunc(GL_ONE, GL_ONE);
-
-		// Clear all layers of the DOM texture array
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 1, -1, "DOM Clear");
-		clear_dom_texture_array(ctx);
-		glPopDebugGroup();
-
-		// Bind DOM FBO and attach the WHOLE array texture as layered target
-		GLuint fbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_fb.handle));
-		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-		glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, dom_tau_array_gl, 0);
-
-		GLenum buf = GL_COLOR_ATTACHMENT0;
-		glDrawBuffers(1, &buf);
-
-		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-		if (status != GL_FRAMEBUFFER_COMPLETE) {
-			std::cout << "DOM FBO ERROR: " << status << std::endl;
-		}
-
-		dom_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * fur.transformation_matrix);
-		dom_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
-		dom_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
-		dom_shader.set_uniform(ctx, "widthTip", widthTip);
-		dom_shader.set_uniform(ctx, "widthRoot", widthRoot);
-		dom_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
-		dom_shader.set_uniform(ctx, "u_domNear", dom_near);
-		dom_shader.set_uniform(ctx, "u_domFar", dom_far);
-
-		fur.set_modelview(rctx);
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 2, -1, "DOM Draw Fur");
-		fur.va.enable(ctx);
-		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
-		fur.va.disable(ctx);
-		glPopDebugGroup();
-
-		// Unbind framebuffer
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-		dom_shader.disable(ctx);
-		glPopDebugGroup();
-
-		glDisable(GL_BLEND);
-		glDepthMask(GL_TRUE);
-
-		ctx.pop_window_transformation_array();
-
-		// E(u,v)
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 40, -1, "Irradiance E(u,v) Pass");
-		euv_shader.enable(ctx);
-		euv_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
-		euv_shader.set_uniform(ctx, "u_lightRadiance", light.color);
-		euv_shader.set_uniform(ctx, "u_boundaryNormalWS", cgv::vec3(0.0f, 1.0f, 0.0f));
-		euv_shader.set_uniform(ctx, "u_ambientIrradiance", cgv::vec3(0.1f));
-		euv_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
-		euv_shader.set_uniform(ctx, "u_widthTip", widthTip);
-		euv_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
-		euv_shader.set_uniform(ctx, "shadowMap", 0);
-
-		external_occluders_depth_map.enable(ctx, 0);
-		fb.enable(ctx, 0);
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-		fb.disable(ctx);
-		external_occluders_depth_map.disable(ctx);
-		euv_shader.disable(ctx);
+
+		scene_texture.disable(ctx);
+		hair_reveal.disable(ctx);
+		hair_accum.disable(ctx);
+
+		hair_resolve_shader.disable(ctx);
 		glPopDebugGroup();
+	}
 
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 50, -1, "Irradiance Blur Passes");
-		for (int i = 1; i < BLUR_PASSES; ++i) {
-			blur(ctx, irradianceBasis[0], cgv::vec2(1.0f, 0.0f), sigma[i], temp);
-			blur(ctx, temp, cgv::vec2(0.0f, 1.0f), sigma[i], irradianceBasis[i]);
-		}
-		glPopDebugGroup();
-
-		// OPAQUE SCENE
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 60, -1, "Opaque Scene Pass");
-		scene_fb.enable(ctx, 0);
-		glClearColor(1.0, 1.0, 1.0, 1.0);
-		glClearDepth(1.0);
-		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
-		textured_surface.enable(ctx);
-		textured_surface.set_uniform(ctx, "shadowMap", 0);
-		textured_surface.set_uniform(ctx, "jitter_tex", 1);
-		textured_surface.set_uniform(ctx, "uTex", 2);
-		textured_surface.set_uniform(ctx, "u_lightdir", light.direction);
-		textured_surface.set_uniform(ctx, "u_lightColor", light.color);
-		textured_surface.set_uniform(ctx, "u_ambient", cgv::vec3(0.2f, 0.2f, 0.2f));
-		textured_surface.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
-		textured_surface.set_uniform(ctx, "u_widthTip", widthTip);
-		textured_surface.set_uniform(ctx, "u_widthRoot", widthRoot);
-
-		all_occluders_depth_map.enable(ctx, 0);
-		jitter_tex.enable(ctx, 1);
-
-		floor.albedo_tex.enable(ctx, 2);
-		floor.draw_bound(rctx, textured_surface);
-		floor.albedo_tex.disable(ctx);
-
-		sphere.albedo_tex.enable(ctx, 2);
-		sphere.draw_bound(rctx, textured_surface);
-		sphere.albedo_tex.disable(ctx);
-
-		all_occluders_depth_map.disable(ctx);
-		jitter_tex.disable(ctx);
-
-		textured_surface.disable(ctx);
-		scene_fb.disable(ctx);
-		ctx.pop_modelview_matrix();
-		glPopDebugGroup();
-
-		// VIEW-THICKNESS PASS
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 70, -1, "View Thickness Pass");
-		thickness_fb.enable(ctx, 0);
-		glViewport(0, 0, ctx.get_width(), ctx.get_height());
-
-		const float zero1[4] = { 0, 0, 0, 0 };
-		glClearBufferfv(GL_COLOR, 0, zero1);
-
-		glDisable(GL_CULL_FACE);
-		glEnable(GL_DEPTH_TEST);
-		glDepthFunc(GL_LESS);
-		glDepthMask(GL_FALSE);
-		glEnable(GL_BLEND);
-		glBlendEquation(GL_FUNC_ADD);
-		glBlendFunc(GL_ONE, GL_ONE);
-
-		thickness_shader.enable(ctx);
-
-		thickness_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
-		thickness_shader.set_uniform(ctx, "u_model_normal_matrix", rctx.get_normal_matrix(fur.transformation_matrix));
-		thickness_shader.set_uniform(ctx, "u_widthTip", widthTip);
-		thickness_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
-
-		fur.set_modelview(rctx);
-		fur.va.enable(ctx);
-		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
-		fur.va.disable(ctx);
-
-		thickness_shader.disable(ctx);
-		thickness_fb.disable(ctx);
-		glPopDebugGroup();
-
-		glDisable(GL_BLEND);
-		glDepthMask(GL_TRUE);
-
-		// HAIR BUFFER PASS
+	void render_hair_buffer(cgv::render::context& ctx)
+	{
 		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 80, -1, "Hair Buffer Pass");
 		glDisable(GL_BLEND);
 
@@ -955,6 +749,10 @@ public:
 		hair_buffer_shader.set_uniform(ctx, "u_debugShowTau", debug_show_tau);
 		hair_buffer_shader.set_uniform(ctx, "u_debugShowAlpha", debug_show_alpha);
 
+		hair_buffer_shader.set_uniform(ctx, "u_UseDOM", debug_show_DOM);
+		hair_buffer_shader.set_uniform(ctx, "u_UseDepth", debug_use_depth);
+
+
 		fur.set_modelview(rctx);
 		fur.va.enable(ctx);
 		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
@@ -977,29 +775,258 @@ public:
 		glDisable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glPopDebugGroup();
+	}
 
-		// HAIR RESOLVE
-		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 90, -1, "Hair Resolve Pass");
-		hair_resolve_shader.enable(ctx);
+	void render_view_thickness(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 70, -1, "View Thickness Pass");
+		thickness_fb.enable(ctx, 0);
+		glViewport(0, 0, ctx.get_width(), ctx.get_height());
 
-		hair_accum.enable(ctx, 0);
-		hair_reveal.enable(ctx, 1);
-		scene_texture.enable(ctx, 2);
+		const float zero1[4] = { 0, 0, 0, 0 };
+		glClearBufferfv(GL_COLOR, 0, zero1);
 
-		hair_resolve_shader.set_uniform(ctx, "u_AccumTex", 0);
-		hair_resolve_shader.set_uniform(ctx, "u_logRTex", 1);
-		hair_resolve_shader.set_uniform(ctx, "u_sceneColor", 2);
-		hair_resolve_shader.set_uniform(ctx, "u_widthTip", widthTip);
-		hair_resolve_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
+		glDisable(GL_CULL_FACE);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendEquation(GL_FUNC_ADD);
+		glBlendFunc(GL_ONE, GL_ONE);
 
-		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		thickness_shader.enable(ctx);
 
-		scene_texture.disable(ctx);
-		hair_reveal.disable(ctx);
-		hair_accum.disable(ctx);
+		thickness_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
+		thickness_shader.set_uniform(ctx, "u_model_normal_matrix", rctx.get_normal_matrix(fur.transformation_matrix));
+		thickness_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		thickness_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
 
-		hair_resolve_shader.disable(ctx);
+		fur.set_modelview(rctx);
+		fur.va.enable(ctx);
+		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
+		fur.va.disable(ctx);
+
+		thickness_shader.disable(ctx);
+		thickness_fb.disable(ctx);
 		glPopDebugGroup();
+
+		glDisable(GL_BLEND);
+		glDepthMask(GL_TRUE);
+	}
+
+	void render_opaque_scene(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 60, -1, "Opaque Scene Pass");
+		scene_fb.enable(ctx, 0);
+		glClearColor(1.0, 1.0, 1.0, 1.0);
+		glClearDepth(1.0);
+		glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+		textured_surface.enable(ctx);
+		textured_surface.set_uniform(ctx, "shadowMap", 0);
+		textured_surface.set_uniform(ctx, "jitter_tex", 1);
+		textured_surface.set_uniform(ctx, "uTex", 2);
+		textured_surface.set_uniform(ctx, "u_lightdir", light.direction);
+		textured_surface.set_uniform(ctx, "u_lightColor", light.color);
+		textured_surface.set_uniform(ctx, "u_ambient", cgv::vec3(0.2f, 0.2f, 0.2f));
+		textured_surface.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
+		textured_surface.set_uniform(ctx, "u_widthTip", widthTip);
+		textured_surface.set_uniform(ctx, "u_widthRoot", widthRoot);
+
+		all_occluders_depth_map.enable(ctx, 0);
+		jitter_tex.enable(ctx, 1);
+
+		floor.albedo_tex.enable(ctx, 2);
+		floor.draw_bound(rctx, textured_surface);
+		floor.albedo_tex.disable(ctx);
+
+		sphere.albedo_tex.enable(ctx, 2);
+		sphere.draw_bound(rctx, textured_surface);
+		sphere.albedo_tex.disable(ctx);
+
+		all_occluders_depth_map.disable(ctx);
+		jitter_tex.disable(ctx);
+
+		textured_surface.disable(ctx);
+		scene_fb.disable(ctx);
+		ctx.pop_modelview_matrix();
+		glPopDebugGroup();
+	}
+
+	void render_irradiance(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 40, -1, "Irradiance E(u,v) Pass");
+		euv_shader.enable(ctx);
+		euv_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+		euv_shader.set_uniform(ctx, "u_lightRadiance", light.color);
+		euv_shader.set_uniform(ctx, "u_boundaryNormalWS", cgv::vec3(0.0f, 1.0f, 0.0f));
+		euv_shader.set_uniform(ctx, "u_ambientIrradiance", cgv::vec3(0.1f));
+		euv_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix);
+		euv_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		euv_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
+		euv_shader.set_uniform(ctx, "shadowMap", 0);
+
+		external_occluders_depth_map.enable(ctx, 0);
+		fb.enable(ctx, 0);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		fb.disable(ctx);
+		external_occluders_depth_map.disable(ctx);
+		euv_shader.disable(ctx);
+		glPopDebugGroup();
+
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 50, -1, "Irradiance Blur Passes");
+		for (int i = 1; i < BLUR_PASSES; ++i) {
+			blur(ctx, irradianceBasis[0], cgv::vec2(1.0f, 0.0f), sigma[i], temp);
+			blur(ctx, temp, cgv::vec2(0.0f, 1.0f), sigma[i], irradianceBasis[i]);
+		}
+		glPopDebugGroup();
+	}
+
+	void render_dom(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "DOM Pass");
+		dom_shader.enable(ctx);
+
+		ctx.push_window_transformation_array();
+		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
+
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glEnable(GL_BLEND);
+		glBlendEquation(GL_FUNC_ADD);
+		glBlendFunc(GL_ONE, GL_ONE);
+		glDisable(GL_SCISSOR_TEST);
+
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 1, -1, "DOM Clear");
+		clear_dom_texture_array(ctx);
+		glPopDebugGroup();
+
+		GLuint fbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(dom_fb.handle));
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+		glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, dom_tau_array_gl, 0);
+
+		GLenum buf = GL_COLOR_ATTACHMENT0;
+		glDrawBuffers(1, &buf);
+
+		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE) {
+			std::cout << "DOM FBO ERROR: " << status << std::endl;
+		}
+
+		dom_shader.set_uniform(ctx, "u_lightSpaceMatrix", rctx.light_matrix * fur.transformation_matrix);
+		dom_shader.set_uniform(ctx, "u_model_matrix", fur.transformation_matrix);
+		dom_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+		dom_shader.set_uniform(ctx, "widthTip", widthTip);
+		dom_shader.set_uniform(ctx, "widthRoot", widthRoot);
+		dom_shader.set_uniform(ctx, "u_domLayerCount", dom_layer_count);
+		dom_shader.set_uniform(ctx, "u_domNear", dom_near);
+		dom_shader.set_uniform(ctx, "u_domFar", dom_far);
+		dom_shader.set_uniform(ctx, "u_tauScale", dom_tau_scale);
+		dom_shader.set_uniform(ctx, "u_rootDensity", dom_root_density);
+		dom_shader.set_uniform(ctx, "u_tipDensity", dom_tip_density);
+		dom_shader.set_uniform(ctx, "u_minRibbonTau", dom_min_ribbon_tau);
+		dom_shader.set_uniform(ctx, "u_domDepthMin01", dom_depth_min01);
+		dom_shader.set_uniform(ctx, "u_domDepthMax01", dom_depth_max01);
+		dom_shader.set_uniform(ctx, "u_domDepthPower", dom_depth_power);
+
+		fur.set_modelview(rctx);
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 2, -1, "DOM Draw Fur");
+		fur.va.enable(ctx);
+		glDrawArrays(GL_TRIANGLES, 0, (GLsizei)fur.verts.size());
+		fur.va.disable(ctx);
+		glPopDebugGroup();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		dom_shader.disable(ctx);
+		glPopDebugGroup();
+
+		glDisable(GL_BLEND);
+		glDepthMask(GL_TRUE);
+
+		ctx.pop_window_transformation_array();
+	}
+
+	void render_shadow_map_external_occluders(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 20, -1, "Shadow Map - External Occluders");
+		external_occluders_shadow_map.enable(ctx);
+		glDrawBuffer(GL_NONE);
+		glReadBuffer(GL_NONE);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_BLEND);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
+		glDepthMask(GL_TRUE);
+		glDisable(GL_STENCIL_TEST);
+		glClearDepth(1.0);
+		glClear(GL_DEPTH_BUFFER_BIT);
+
+		shadow_mapping_shader.enable(ctx);
+		shadow_mapping_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
+
+		floor.draw_depth(rctx, shadow_mapping_shader);
+		sphere.draw_depth(rctx, shadow_mapping_shader);
+
+		shadow_mapping_shader.disable(ctx);
+		external_occluders_shadow_map.disable(ctx);
+
+		glEnable(GL_SCISSOR_TEST);
+		glEnable(GL_CULL_FACE);
+		ctx.pop_window_transformation_array();
+
+		ctx.push_modelview_matrix();
+		glPopDebugGroup();
+	}
+
+	void render_shadow_map__all_occluders(cgv::render::context& ctx)
+	{
+		glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 10, -1, "Shadow Map - All Occluders");
+		ctx.push_window_transformation_array();
+		ctx.set_viewport(cgv::ivec4(0, 0, shadow_map_resolution, shadow_map_resolution));
+
+		all_occluders_shadow_map.enable(ctx);
+		glDrawBuffer(GL_NONE);
+		glReadBuffer(GL_NONE);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_BLEND);
+		glEnable(GL_DEPTH_TEST);
+		glDepthFunc(GL_LESS);
+		glDepthMask(GL_TRUE);
+		glDisable(GL_STENCIL_TEST);
+		glClearDepth(1.0);
+		glClear(GL_DEPTH_BUFFER_BIT);
+
+		shadow_mapping_shader.enable(ctx);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthTip", widthTip);
+		shadow_mapping_shader.set_uniform(ctx, "u_widthRoot", widthRoot);
+		shadow_mapping_shader.set_uniform(ctx, "u_lightDirWS", light.direction);
+
+		floor.draw_depth(rctx, shadow_mapping_shader);
+		fur.draw_depth(rctx, shadow_mapping_shader);
+		sphere.draw_depth(rctx, shadow_mapping_shader);
+
+		shadow_mapping_shader.disable(ctx);
+		all_occluders_shadow_map.disable(ctx);
+		glPopDebugGroup();
+	}
+
+	void update_light_matrices()
+	{
+
+		all_occluders_depth_map.set_compare_mode(true);
+		external_occluders_depth_map.set_compare_mode(true);
+
+		cgv::vec3 light_direction = normalize(light.direction);
+		cgv::mat4 light_projection = cgv::math::ortho4(-3.0f, 3.0f, -3.0f, 3.0f, 0.1f, 10.0f);
+		cgv::mat4 light_view = cgv::math::look_at4(5.0f * light_direction, cgv::vec3(1.0f, 1.0f, 1.0f), cgv::vec3(0.0f, 1.0f, 0.0f));
+		cgv::mat4 light_matrix = light_projection * light_view;
+
+		rctx.store_view();
+		rctx.light_matrix = light_matrix;
 	}
 
 	void blur(cgv::render::context& ctx, cgv::render::texture& src, cgv::vec2 direction, float sigma, cgv::render::texture& dest)
@@ -1425,21 +1452,17 @@ public:
 			float dz = std::abs(rootUV.y() - 0.5f) * 2.0f;
 			float edge = std::max(dx, dz);
 
-			// Softer rectangular footprint
 			float centerFactor = 1.0f - smoothstep01(edge);
 
-			// Add sparse holes / breakup so it stops reading as a solid sheet
 			float macroNoise = hash21(rootUV * 9.0f);
 			float microNoise = hash21(rootUV * 31.0f + cgv::vec2(4.2f, 1.7f));
 			float densityMask = 0.75f * centerFactor + 0.25f * macroNoise;
 
-			// Random strand dropout
 			if (densityMask < 0.18f)
 				continue;
 			if (microNoise < 0.10f)
 				continue;
 
-			// Clumping
 			cgv::vec2 clumpCenter;
 			float clumpDist2 = 0.0f;
 			nearest_clump(rootUV, clumpCenter, clumpDist2);
@@ -1447,7 +1470,6 @@ public:
 			float clumpRadius = 0.018f + 0.02f * hash21(clumpCenter * 13.7f);
 			float clumpT = std::exp(-clumpDist2 / std::max(1e-5f, clumpRadius * clumpRadius));
 
-			// Root position with slight pull toward clump center
 			cgv::vec2 rootUVClumped =
 				rootUV * (1.0f - 0.18f * clumpT) + clumpCenter * (0.18f * clumpT);
 
@@ -1455,7 +1477,6 @@ public:
 			float pz = (rootUVClumped.y() - 0.5f) * PATCH_DEPTH;
 			cgv::vec3 rootPos(px, 0.0f, pz);
 
-			// Much more aggressive length variation
 			float lengthRnd = 0.55f + 0.9f * dist01(rng);
 			float clumpLengthBoost = 0.85f + 0.45f * clumpT;
 			float strandLength =
@@ -1463,11 +1484,9 @@ public:
 				lengthRnd *
 				clumpLengthBoost;
 
-			// Some shorter broken hairs
 			if (dist01(rng) < 0.12f)
 				strandLength *= 0.45f + 0.35f * dist01(rng);
 
-			// Base orientation
 			float yawJitter = 1.1f * jitter(rng);
 			float pitchJitter = 0.75f * jitter(rng);
 
@@ -1475,14 +1494,12 @@ public:
 			dir = rotate_y(dir, yawJitter);
 			dir = rotate_z(dir, pitchJitter);
 
-			// Clump directional coherence
 			float clumpYaw = (hash21(clumpCenter * 19.3f) - 0.5f) * 0.8f;
 			float clumpPitch = (hash21(clumpCenter * 7.9f) - 0.5f) * 0.35f;
 			dir = rotate_y(dir, clumpYaw * clumpT);
 			dir = rotate_z(dir, clumpPitch * clumpT);
 			dir = cgv::math::normalize(dir);
 
-			// Localized flow variation instead of one global uniform flow
 			cgv::vec3 flowDir = cgv::math::normalize(cgv::vec3(
 				0.75f + 0.55f * (hash21(rootUV * 5.0f) - 0.5f),
 				0.02f + 0.08f * hash21(rootUV * 11.0f + cgv::vec2(3.0f, 9.0f)),
@@ -1501,7 +1518,6 @@ public:
 				float bendAmount = t * t;
 				float tipAmount = std::pow(t, 1.5f);
 
-				// Stronger shape variation along the strand
 				cgv::vec3 tangent =
 					cgv::math::normalize((1.0f - bendAmount) * dir + bendAmount * flowDir);
 
@@ -1511,7 +1527,6 @@ public:
 					jitter(rng) * 0.12f
 				);
 
-				// Clump pull increases toward the tip
 				cgv::vec3 toClump = cgv::vec3(
 					(clumpCenter.x() - rootUV.x()) * PATCH_WIDTH,
 					0.0f,

@@ -4,7 +4,11 @@ layout(triangles) in;
 layout(triangle_strip, max_vertices = 3) out;
 
 uniform int u_domLayerCount;
-uniform float u_domDepthPower; // start with 0.35
+
+// debug
+uniform float u_domDepthMin01;
+uniform float u_domDepthMax01;
+uniform float u_domDepthPower;
 
 in VS_OUT {
     float vAlong;
@@ -28,11 +32,19 @@ void main()
 
     avgDepth01 = clamp(avgDepth01, 0.0, 1.0);
 
-    // Non-linear slicing: distributes samples more usefully across DOM layers.
-    float warpedDepth = pow(avgDepth01, u_domDepthPower);
+    float depthMin = clamp(u_domDepthMin01, 0.0, 1.0);
+    float depthMax = clamp(u_domDepthMax01, depthMin + 1e-5, 1.0);
 
-    int maxLayer = max(u_domLayerCount - 1, 0);
-    int layer = int(round(warpedDepth * float(maxLayer)));
+    float d = (avgDepth01 - depthMin) / (depthMax - depthMin);
+    d = clamp(d, 0.0, 0.999);
+
+    float power = max(u_domDepthPower, 1e-4);
+    d = pow(d, power);
+
+    int layerCount = max(u_domLayerCount, 1);
+    int maxLayer = layerCount - 1;
+
+    int layer = int(floor(d * float(layerCount)));
     layer = clamp(layer, 0, maxLayer);
 
     float layer01 = maxLayer > 0 ? float(layer) / float(maxLayer) : 0.0;
